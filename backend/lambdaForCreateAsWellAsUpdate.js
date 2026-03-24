@@ -1,0 +1,1990 @@
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { randomUUID } from "crypto";
+
+// Initialize AWS clients
+const dynamoClient = new DynamoDBClient({ region: "us-east-2" });
+const dynamodb = DynamoDBDocumentClient.from(dynamoClient, {
+    marshallOptions: {
+        removeUndefinedValues: true
+    }
+});
+const s3 = new S3Client({
+    region: "us-east-2",
+    forcePathStyle: true
+});
+
+// Table names
+const PATIENTS_TABLE = 'Patients';
+const CLINICAL_HISTORY_TABLE = 'ClinicalParametersHistory';
+const MEDICAL_HISTORY_TABLE = 'MedicalHistoryEntries';
+const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
+const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
+const REPORTS_BUCKET = 'dr-gawli-patient-files-use2-5694';
+const VISITS_TABLE = 'Visits';
+
+// ============================================
+// PRESIGNED URL GENERATION FOR UPLOADS
+// ============================================
+
+/**
+ * Generate presigned URL for direct file upload from frontend
+ * This eliminates Base64 encoding entirely
+ */
+async function generatePresignedUploadUrl(requestData) {
+    try {
+        const { patientId, fileName, fileType, category = 'uncategorized' } = requestData;
+
+        if (!patientId || !fileName) {
+            return formatErrorResponse("Missing patientId or fileName");
+        }
+
+        // Generate unique S3 key
+        const timestamp = Date.now();
+        const randomSuffix = Math.floor(Math.random() * 10000);
+        const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const s3Key = `${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
+
+        console.log(`📤 Generating presigned URL for: ${s3Key}`);
+
+        // Create presigned PUT URL (expires in 5 minutes)
+        const command = new PutObjectCommand({
+            Bucket: REPORTS_BUCKET,
+            Key: s3Key,
+            ContentType: fileType || 'application/octet-stream',
+            Metadata: {
+                'patient-id': patientId,
+                'original-name': sanitizedName,
+                'category': category,
+                'upload-timestamp': new Date().toISOString()
+            }
+        });
+
+        const presignedUrl = await getSignedUrl(s3, command, {
+            expiresIn: 300 // 5 minutes
+        });
+
+        console.log(`✅ Generated presigned URL for ${fileName}`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                uploadUrl: presignedUrl,
+                s3Key: s3Key,
+                fileName: fileName,
+                expiresIn: 300
+            })
+        };
+    } catch (error) {
+        console.error('❌ Error generating presigned URL:', error);
+        return formatErrorResponse(`Failed to generate upload URL: ${error.message}`);
+    }
+}
+
+/**
+ * Confirm file upload and save metadata to DynamoDB
+ * Called after frontend successfully uploads to S3
+ */
+async function confirmFileUpload(requestData) {
+    try {
+        const { patientId, s3Key, fileName, fileType, category = 'uncategorized', fileSize } = requestData;
+
+        if (!patientId || !s3Key) {
+            return formatErrorResponse("Missing patientId or s3Key");
+        }
+
+        console.log(`🔍 Confirming upload for: ${s3Key}`);
+
+        // Verify file exists in S3
+        try {
+            await s3.send(new HeadObjectCommand({
+                Bucket: REPORTS_BUCKET,
+                Key: s3Key
+            }));
+            console.log(`✅ File verified in S3: ${s3Key}`);
+        } catch (error) {
+            console.error(`❌ File not found in S3: ${s3Key}`);
+            return formatErrorResponse("File upload verification failed");
+        }
+
+        // Get current patient record
+        const patientResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!patientResult.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        // Create file metadata (NO URLs, NO Base64)
+        const fileMetadata = {
+            s3Key: s3Key,
+            fileName: fileName,
+            fileType: fileType || 'application/octet-stream',
+            category: category,
+            fileSize: fileSize || 0,
+            uploadedAt: new Date().toISOString(),
+            uploadedToS3: true
+        };
+
+        // Add to patient's reportFiles array
+        const currentFiles = patientResult.Item.reportFiles || [];
+        currentFiles.push(fileMetadata);
+
+        // Update patient record
+        await dynamodb.send(new UpdateCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: "SET reportFiles = :files, updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":files": currentFiles,
+                ":updatedAt": new Date().toISOString()
+            }
+        }));
+
+        console.log(`✅ File metadata saved to DynamoDB for patient ${patientId}`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                message: "File upload confirmed",
+                fileMetadata: fileMetadata
+            })
+        };
+    } catch (error) {
+        console.error('❌ Error confirming file upload:', error);
+        return formatErrorResponse(`Failed to confirm upload: ${error.message}`);
+    }
+}
+
+// ============================================
+// SIGNED URL GENERATION FOR DOWNLOADS
+// ============================================
+
+/**
+ * Non-destructive helper: Add signed URLs to report files
+ * CRITICAL: Never removes data, only enriches it
+ */
+async function enrichPatientFilesWithSignedUrls(reportFiles) {
+    if (!Array.isArray(reportFiles) || reportFiles.length === 0) {
+        return [];
+    }
+
+    console.log(`🔐 Generating signed URLs for ${reportFiles.length} files`);
+
+    const enrichedFiles = await Promise.all(
+        reportFiles.map(async (file) => {
+            try {
+                // Preserve all original data
+                const enrichedFile = { ...file };
+
+                // Check for both 'key' and 's3Key' for backward compatibility
+                const s3Key = file.s3Key || file.key;
+
+                // Generate signed URL if we have an S3 key
+                if (s3Key) {
+                    try {
+                        const command = new GetObjectCommand({
+                            Bucket: REPORTS_BUCKET,
+                            Key: s3Key
+                        });
+
+                        const signedUrl = await getSignedUrl(s3, command, {
+                            expiresIn: 600 // 10 minutes for viewing
+                        });
+
+                        enrichedFile.url = signedUrl; // Set 'url' field for UI compatibility
+                        enrichedFile.signedUrl = signedUrl; // Also keep signedUrl
+                        enrichedFile.s3Key = s3Key; // Normalize to s3Key
+                        enrichedFile.urlExpiresAt = new Date(Date.now() + 600000).toISOString();
+                        console.log(`✅ Signed URL generated for: ${file.fileName || file.name}`);
+                    } catch (signError) {
+                        console.warn(`⚠️ Failed to sign ${file.fileName || file.name}: ${signError.message}`);
+                        enrichedFile.signError = signError.message;
+                        // File metadata still returned - no data loss
+                    }
+                } else {
+                    console.warn(`⚠️ No S3 key for file: ${file.fileName || file.name}`);
+                }
+
+                return enrichedFile;
+            } catch (error) {
+                console.error(`❌ Error processing file: ${error.message}`);
+                // Return original file data - no data loss
+                return file;
+            }
+        })
+    );
+
+    return enrichedFiles;
+}
+
+// ============================================
+// PATIENT DATA RETRIEVAL
+// ============================================
+
+async function handleGetPatient(patientId, forceRefresh = false) {
+    try {
+        console.log(`🔍 Getting patient data for ID: ${patientId}`);
+
+        const command = new GetItemCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { "patientId": { "S": patientId } }
+        });
+
+        if (forceRefresh) {
+            command.input.ConsistentRead = true;
+        }
+
+        const result = await dynamoClient.send(command);
+
+        if (!result.Item) {
+            return formatErrorResponse(`Patient not found: ${patientId}`);
+        }
+
+        const patientData = unmarshallDynamoDBItem(result.Item);
+
+        // Enrich report files with signed URLs (non-destructive)
+        if (patientData.reportFiles && Array.isArray(patientData.reportFiles)) {
+            console.log(`📂 Found ${patientData.reportFiles.length} report files`);
+            patientData.reportFiles = await enrichPatientFilesWithSignedUrls(patientData.reportFiles);
+        }
+
+        // Get history data concurrently
+        const [
+            clinicalHistoryResponse,
+            medicalHistoryResponse,
+            diagnosisHistoryResponse,
+            investigationsHistoryResponse
+        ] = await Promise.all([
+            fetchClinicalHistory(patientId),
+            fetchMedicalHistory(patientId),
+            fetchDiagnosisHistory(patientId),
+            fetchInvestigationsHistory(patientId)
+        ]);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true,
+                'Cache-Control': 'no-cache, no-store, must-revalidate'
+            },
+            body: JSON.stringify({
+                success: true,
+                patient: patientData,
+                clinicalHistory: clinicalHistoryResponse.clinicalHistory || [],
+                medicalHistory: medicalHistoryResponse.medicalHistory || [],
+                diagnosisHistory: diagnosisHistoryResponse.diagnosisHistory || [],
+                investigationsHistory: investigationsHistoryResponse.investigationsHistory || [],
+                freshData: forceRefresh
+            })
+        };
+    } catch (error) {
+        console.error('❌ Error getting patient:', error);
+        return formatErrorResponse(`Failed to get patient: ${error.message}`);
+    }
+}
+
+/**
+ * Get all patient files with signed URLs
+ */
+async function handleGetPatientFiles(patientId) {
+    try {
+        console.log(`📂 Getting files for patient: ${patientId}`);
+
+        // Get from DynamoDB
+        const patientResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!patientResult.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        const reportFiles = patientResult.Item.reportFiles || [];
+
+        // Enrich with signed URLs
+        const enrichedFiles = await enrichPatientFilesWithSignedUrls(reportFiles);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                files: enrichedFiles,
+                count: enrichedFiles.length
+            })
+        };
+    } catch (error) {
+        console.error('❌ Error getting patient files:', error);
+        return formatErrorResponse(`Failed to get files: ${error.message}`);
+    }
+}
+
+/**
+ * Delete a patient file
+ */
+async function deletePatientFile(requestData) {
+    try {
+        const { patientId, s3Key, fileName } = requestData;
+
+        if (!patientId || (!s3Key && !fileName)) {
+            return formatErrorResponse("Missing patientId or file identifier");
+        }
+
+        console.log(`🗑️ Deleting file: ${s3Key || fileName}`);
+
+        // Get patient record
+        const patientResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!patientResult.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        // Find and remove file from array
+        let reportFiles = patientResult.Item.reportFiles || [];
+        const fileToDelete = reportFiles.find(f =>
+            f.s3Key === s3Key || f.fileName === fileName
+        );
+
+        if (!fileToDelete) {
+            return formatErrorResponse("File not found");
+        }
+
+        // Delete from S3 if it exists
+        if (fileToDelete.s3Key) {
+            try {
+                await s3.send(new DeleteObjectCommand({
+                    Bucket: REPORTS_BUCKET,
+                    Key: fileToDelete.s3Key
+                }));
+                console.log(`✅ Deleted from S3: ${fileToDelete.s3Key}`);
+            } catch (s3Error) {
+                console.warn(`⚠️ S3 deletion failed: ${s3Error.message}`);
+                // Continue with DynamoDB deletion
+            }
+        }
+
+        // Remove from array
+        reportFiles = reportFiles.filter(f =>
+            f.s3Key !== s3Key && f.fileName !== fileName
+        );
+
+        // Update DynamoDB
+        await dynamodb.send(new UpdateCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: "SET reportFiles = :files, updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":files": reportFiles,
+                ":updatedAt": new Date().toISOString()
+            }
+        }));
+
+        console.log(`✅ File deleted successfully`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                message: "File deleted successfully",
+                remainingFiles: reportFiles.length
+            })
+        };
+    } catch (error) {
+        console.error('❌ Error deleting file:', error);
+        return formatErrorResponse(`Failed to delete file: ${error.message}`);
+    }
+}
+
+// ============================================
+// MAIN HANDLER
+// ============================================
+
+async function getPatientHistory(requestData) {
+    const { patientId, type } = requestData;
+
+    if (!patientId) {
+        return formatErrorResponse('patientId is required');
+    }
+
+    try {
+        console.log(`🔍 Fetching history for patient: ${patientId}, type: ${type}`);
+        
+        const command = new QueryCommand({
+            TableName: VISITS_TABLE,
+            IndexName: 'patientId-status-index',
+            KeyConditionExpression: 'patientId = :pid',
+            ExpressionAttributeValues: {
+                ':pid': patientId
+            },
+            ScanIndexForward: false 
+        });
+
+        const data = await dynamodb.send(command);
+
+        let formattedRecords = [];
+
+        if (type === 'diagnoses') {
+            formattedRecords = (data.Items || [])
+                .filter(item => item.diagnosis)
+                .map(item => ({
+                    date: item.visitDate || item.visitId || new Date().toISOString(),
+                    title: item.diagnosis.split('\n')[0] || 'Diagnosis',
+                    details: item.diagnosis, 
+                    doctorName: item.doctorName || 'Dr. Tiwari'
+                }));
+        } else if (type === 'investigations') {
+            formattedRecords = (data.Items || [])
+                .filter(item => (item.selectedInvestigations && item.selectedInvestigations.length > 0) || item.customInvestigations)
+                .map(item => {
+                    const standard = item.selectedInvestigations ? item.selectedInvestigations.join(', ') : '';
+                    const custom = item.customInvestigations ? `Other: ${item.customInvestigations}` : '';
+                    const details = [standard, custom].filter(Boolean).join(' | ');
+
+                    return {
+                        date: item.visitDate || item.visitId || new Date().toISOString(),
+                        title: 'Advised Investigations',
+                        details: details,
+                        doctorName: item.doctorName || 'Dr. Tiwari'
+                    };
+                });
+        }
+
+        return formatSuccessResponse(formattedRecords);
+
+    } catch (error) {
+        console.error("DynamoDB Query Error:", error);
+        return formatErrorResponse(`Failed to fetch history: ${error.message}`);
+    }
+}
+
+export const handler = async (event, context) => {
+    try {
+        console.log("LOG: Lambda invoked");
+        console.log("LOG: HTTP method:", event.httpMethod || event.requestContext?.http?.method);
+        context.callbackWaitsForEmptyEventLoop = false;
+
+        // Handle CORS preflight
+        const method = event.httpMethod || event.requestContext?.http?.method || '';
+        if (method === "OPTIONS") {
+            return {
+                statusCode: 200,
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Credentials": true,
+                    "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE,PATCH"
+                },
+                body: JSON.stringify({ message: "CORS preflight successful" })
+            };
+        }
+
+        // ============================================================
+        // HARDENED BODY PARSING
+        // Handles API Gateway proxy v1/v2, CloudFront, and direct invoke
+        // ============================================================
+        let requestData = {};
+
+        try {
+            if (event.body) {
+                // API Gateway proxy integration — body is always a string here
+                const rawBody = event.isBase64Encoded
+                    ? Buffer.from(event.body, 'base64').toString('utf8')
+                    : event.body;
+
+                // Handle double-stringified body (some CloudFront configs wrap it)
+                const parsed = JSON.parse(rawBody);
+                requestData = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
+
+            } else if (event.action || event.patientId || event.name) {
+                // Direct Lambda invocation — event IS the payload already
+                requestData = event;
+
+            } else if (event.requestContext && !event.body) {
+                // API Gateway proxy with empty body — treat as empty object
+                requestData = {};
+
+            } else {
+                // Last resort fallback
+                requestData = event;
+            }
+        } catch (parseError) {
+            console.error('❌ Body parse error:', parseError.message);
+            console.error('❌ Raw event.body was:', event.body);
+            return formatErrorResponse(`Invalid JSON in request body: ${parseError.message}`);
+        }
+
+        console.log("🧾 requestData action:", requestData.action);
+        console.log("🧾 requestData keys:", Object.keys(requestData));
+
+        const action = requestData.action;
+        console.log(`🎯 Action: ${action}`);
+
+        // Route to appropriate handler
+        switch (action) {
+            case 'getPatientHistory':
+                return await getPatientHistory(requestData);
+                
+            case 'getPresignedUploadUrl':
+                return await generatePresignedUploadUrl(requestData);
+
+            case 'validateRegistration':
+                return await validateRegistration(requestData);
+
+            case 'createPatient':
+                return await processPatientData(requestData);
+
+            case 'confirmFileUpload':
+                return await confirmFileUpload(requestData);
+
+            case 'getPatient':
+                return await handleGetPatient(requestData.patientId);
+
+            case 'getPatientFiles':
+                return await handleGetPatientFiles(requestData.patientId);
+
+            case 'deletePatientFile':
+                return await deletePatientFile(requestData);
+
+            case 'initiateVisit':
+                return await initiateVisit(requestData);
+
+            case 'getActiveVisit':
+                return await getActiveVisit(requestData.patientId);
+
+            case 'updateVisit':
+                return await updateVisit(requestData);
+
+            case 'completeVisit':
+                return await completeVisit(requestData);
+
+            case 'updateVisitStatus':
+                return await updateVisitStatus(requestData);
+
+            case 'getClinicalHistory':
+                return await fetchClinicalHistory(requestData.patientId);
+
+            case 'getMedicalHistory':
+                return await fetchMedicalHistory(requestData.patientId);
+
+            case 'getReportsHistory':
+                return await fetchReportsHistory(requestData.patientId);
+
+            case 'getDiagnosisHistory':
+                return await fetchDiagnosisHistory(requestData.patientId);
+
+            case 'getInvestigationsHistory':
+                return await fetchInvestigationsHistory(requestData.patientId);
+
+            case 'getPrescriptionHistory':
+                return await fetchPrescriptionHistory(requestData.patientId);
+
+            case 'getAllPatients':
+                return await getAllPatients();
+
+            case 'getWaitingRoom':
+                return await handleGetWaitingRoom();
+
+            case 'searchPatients':
+                return await searchPatients(requestData);
+
+            case "deleteDraft":
+                return await deleteDraft(requestData);
+
+            case "saveFitnessCertificate":
+                return await saveFitnessCertificate(requestData);
+
+            case "getFitnessCertificates":
+                return await getFitnessCertificates(requestData.patientId);
+
+            case "searchMedicines":
+                return await searchMedicines(requestData);
+
+            case "addMedicine":
+                return await addMedicine(requestData);
+
+            case "deletePatient":
+                return await deletePatient(requestData);
+
+            default:
+                // Legacy create/update operations (no action field)
+                if (requestData.patientId && requestData.updateMode) {
+                    return await updatePatientData(requestData);
+                } else if (requestData.isPartialSave) {
+                    return await processSectionSave(requestData);
+                } else if (requestData.name && requestData.age && requestData.sex) {
+                    // Plain patient creation — no action field
+                    return await processPatientData(requestData);
+                } else {
+                    // Unknown action — log it clearly so CloudWatch shows the problem
+                    console.error(`❌ Unknown or missing action: "${action}"`);
+                    console.error(`❌ Full requestData:`, JSON.stringify(requestData));
+                    return formatErrorResponse(`Unknown action: "${action}". Received keys: ${Object.keys(requestData).join(', ')}`);
+                }
+        }
+    } catch (error) {
+        console.error('❌ Handler error:', error);
+        return formatErrorResponse(error.message || "Request failed");
+    }
+};
+
+// ============================================
+// VALIDATION LOGIC
+// ============================================
+
+/**
+ * Validates registration data against existing records
+ * Checks for duplicate email or phone
+ */
+async function validateRegistration(requestData) {
+    try {
+        const { email, phone } = requestData;
+
+        if (!email && !phone) {
+            return formatErrorResponse("Email or phone is required for validation");
+        }
+
+        console.log(`🔍 Validating registration for: Email=${email}, Phone=${phone}`);
+
+        const filterExpressions = [];
+        const expressionAttributeValues = {};
+        const expressionAttributeNames = {};
+
+        if (email) {
+            filterExpressions.push("contains(#email, :email)");
+            expressionAttributeNames["#email"] = "email"; // Assuming 'email' attribute exists
+            expressionAttributeValues[":email"] = email.toLowerCase().trim();
+        }
+
+        // For phone, we might need to be careful with formatting, but for now let's try direct match
+        // or contain match if formats vary. 'mobile' seems to be the attribute name in Patients table
+        if (phone) {
+            filterExpressions.push("contains(#mobile, :mobile)");
+            expressionAttributeNames["#mobile"] = "mobile";
+            // Basic sanitation for phone match - this might need refinement based on exact storage format
+            // The searchPatients uses digits ONLY, let's try to match that pattern if possible,
+            // but 'contains' with the raw input is safer if we don't know the stored format perfectly yet.
+            // Let's stick to safe 'contains' for now.
+            expressionAttributeValues[":mobile"] = phone.replace(/[^\d+]/g, ''); // Keep digits and plus
+        }
+
+        // OR logic: invalid if EITHER exists
+        const filterExpression = filterExpressions.join(" OR ");
+
+        // Using Scan is not ideal for high volume but works for now. 
+        // Ideally we should have GSI on email and mobile.
+        const command = new ScanCommand({
+            TableName: PATIENTS_TABLE,
+            FilterExpression: filterExpression,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ProjectionExpression: "patientId, mobile, #email", // Optimize projection
+        });
+
+        const result = await dynamodb.send(command);
+        const matches = result.Items || [];
+
+        if (matches.length > 0) {
+            console.log(`⚠️ Found ${matches.length} matches for registration validation`);
+
+            // Determine SPECIFICALLY what collided
+            const emailTaken = email && matches.some(m => m.email && m.email.toLowerCase() === email.toLowerCase());
+            const phoneTaken = phone && matches.some(m => m.mobile && m.mobile.includes(phone.replace(/[^\d+]/g, '')));
+
+            let errorMessage = "";
+            if (emailTaken && phoneTaken) errorMessage = "Email and Phone are already registered";
+            else if (emailTaken) errorMessage = "Email is already registered";
+            else if (phoneTaken) errorMessage = "Phone number is already registered";
+            else errorMessage = "User already exists"; // Fallback
+
+            return {
+                statusCode: 409, // Conflict
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify({
+                    success: false,
+                    error: errorMessage,
+                    field: emailTaken ? "email" : (phoneTaken ? "phone" : "unknown")
+                })
+            };
+        }
+
+        console.log("✅ Registration validation passed (No duplicates found)");
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                message: "Validation successful"
+            })
+        };
+
+    } catch (error) {
+        console.error('❌ Validation error:', error);
+        return formatErrorResponse(`Validation failed: ${error.message}`);
+    }
+}
+
+// ============================================
+// HELPER FUNCTIONS (Minimal Stubs)
+// ============================================
+
+function unmarshallDynamoDBItem(item) {
+    if (!item) return null;
+    const result = {};
+    for (const key in item) {
+        const value = item[key];
+        if (value.S !== undefined) result[key] = value.S;
+        else if (value.N !== undefined) result[key] = Number(value.N);
+        else if (value.BOOL !== undefined) result[key] = value.BOOL;
+        else if (value.M !== undefined) result[key] = unmarshallDynamoDBItem(value.M);
+        else if (value.L !== undefined) result[key] = value.L.map(i => {
+            if (i.M) return unmarshallDynamoDBItem(i.M);
+            if (i.S) return i.S;
+            if (i.N) return Number(i.N);
+            return null;
+        });
+        else result[key] = value;
+    }
+    return result;
+}
+
+function formatErrorResponse(message, error = null) {
+    console.error(`ERROR: ${message}`, error ? error : "");
+    return {
+        statusCode: 400,
+        headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Credentials': true
+        },
+        body: JSON.stringify({
+            success: false,
+            error: message,
+            details: error ? error.message : undefined,
+            code: error ? error.name : undefined
+        })
+    };
+}
+
+function formatSuccessResponse(data) {
+    return {
+        statusCode: 200,
+        headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Credentials': true
+        },
+        body: JSON.stringify(data)
+    };
+}
+
+// ============================================
+// FILE DEDUPLICATION LOGIC
+// ============================================
+
+/**
+ * Verify if a file exists in S3 (for corrupted metadata recovery)
+ * @param {string} s3Key - The S3 key to verify
+ * @returns {Promise<boolean>} - True if file exists in S3
+ */
+async function verifyFileExistsInS3(s3Key) {
+    if (!s3Key) return false;
+    try {
+        await s3.send(new HeadObjectCommand({
+            Bucket: REPORTS_BUCKET,
+            Key: s3Key
+        }));
+        return true;
+    } catch (error) {
+        if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+            return false;
+        }
+        console.warn(`⚠️ S3 verification error for ${s3Key}:`, error.message);
+        return false;
+    }
+}
+
+/**
+ * Deduplicate report files - prevents re-uploading existing files
+ * 
+ * @param {Array} existingFiles - Files already in DynamoDB for this patient
+ * @param {Array} incomingFiles - Files sent from frontend in update request
+ * @returns {Object} - { mergedFiles, stats: { kept, skipped, new, corrupted } }
+ */
+async function deduplicateReportFiles(existingFiles = [], incomingFiles = []) {
+    console.log(`🔍 Deduplicating files: ${existingFiles.length} existing, ${incomingFiles.length} incoming`);
+
+    const stats = { kept: 0, skipped: 0, new: 0, corrupted: 0, fixed: 0 };
+
+    // Create a Map of existing files by s3Key for O(1) lookup
+    const existingByKey = new Map();
+    const existingByName = new Map(); // Fallback for legacy files
+
+    for (const file of existingFiles) {
+        const key = file.s3Key || file.key;
+        if (key) {
+            existingByKey.set(key, file);
+        }
+        // Also track by fileName for fallback matching
+        if (file.fileName || file.name) {
+            existingByName.set(file.fileName || file.name, file);
+        }
+    }
+
+    const mergedFiles = [];
+    const processedKeys = new Set();
+
+    // Process incoming files
+    for (const incomingFile of incomingFiles) {
+        const incomingKey = incomingFile.s3Key || incomingFile.key;
+
+        // Case 1: File already has S3 key and uploadedToS3 flag - KEEP as-is
+        if (incomingKey && incomingFile.uploadedToS3 === true) {
+            console.log(`⏭️ Keeping already-uploaded file: ${incomingFile.fileName || incomingFile.name}`);
+            mergedFiles.push(incomingFile);
+            processedKeys.add(incomingKey);
+            stats.kept++;
+            continue;
+        }
+
+        // Case 2: File has S3 key but uploadedToS3 is false/missing (corrupted metadata)
+        if (incomingKey && incomingFile.uploadedToS3 !== true) {
+            console.warn(`⚠️ Detected corrupted metadata for file: ${incomingFile.fileName || incomingFile.name}`);
+            stats.corrupted++;
+
+            // Verify with S3 HeadObject
+            const existsInS3 = await verifyFileExistsInS3(incomingKey);
+
+            if (existsInS3) {
+                console.log(`✅ File exists in S3, fixing metadata for: ${incomingKey}`);
+                mergedFiles.push({
+                    ...incomingFile,
+                    uploadedToS3: true, // Fix the corrupted flag
+                    metadataFixedAt: new Date().toISOString()
+                });
+                processedKeys.add(incomingKey);
+                stats.fixed++;
+            } else {
+                console.log(`❌ File NOT in S3, marking as failed: ${incomingKey}`);
+                mergedFiles.push({
+                    ...incomingFile,
+                    uploadedToS3: false,
+                    uploadFailed: true,
+                    verifiedAt: new Date().toISOString()
+                });
+            }
+            continue;
+        }
+
+        // Case 3: File matches existing by s3Key - SKIP (duplicate from frontend)
+        if (incomingKey && existingByKey.has(incomingKey)) {
+            console.log(`⏭️ Skipping duplicate file (matches existing s3Key): ${incomingKey}`);
+            stats.skipped++;
+            // Use the existing file data instead
+            if (!processedKeys.has(incomingKey)) {
+                mergedFiles.push(existingByKey.get(incomingKey));
+                processedKeys.add(incomingKey);
+            }
+            continue;
+        }
+
+        // Case 4: Genuinely NEW file (no s3Key, needs upload)
+        console.log(`📤 New file detected (needs upload): ${incomingFile.fileName || incomingFile.name}`);
+        mergedFiles.push({
+            ...incomingFile,
+            isNew: true,
+            pendingUpload: true
+        });
+        stats.new++;
+    }
+
+    // Add any existing files that weren't in the incoming array
+    // (This preserves files that frontend didn't send - partial array support)
+    for (const [key, existingFile] of existingByKey) {
+        if (!processedKeys.has(key)) {
+            console.log(`📁 Preserving existing file not in update: ${existingFile.fileName || existingFile.name}`);
+            mergedFiles.push(existingFile);
+            processedKeys.add(key);
+            stats.kept++;
+        }
+    }
+
+    console.log(`✅ Deduplication complete: ${JSON.stringify(stats)}`);
+    console.log(`📊 Final merged files count: ${mergedFiles.length}`);
+
+    return { mergedFiles, stats };
+}
+
+// ============================================
+// HISTORY FETCH FUNCTIONS (Consolidated via Visits Table)
+// ============================================
+
+async function _fetchCompletedVisits(patientId) {
+    const result = await dynamodb.send(new QueryCommand({
+        TableName: VISITS_TABLE,
+        IndexName: 'patientId-status-index',
+        KeyConditionExpression: "patientId = :pid AND #s = :status",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":pid": patientId, ":status": "COMPLETED" },
+        ScanIndexForward: false, // Latest first
+        Limit: 50
+    }));
+    return result.Items || [];
+}
+
+async function fetchClinicalHistory(patientId) {
+    try {
+        console.log(`📊 Fetching clinical history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const clinicalHistory = visits
+            .filter(v => v.clinicalParameters && Object.keys(v.clinicalParameters).length > 0)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                ...v.clinicalParameters
+            }));
+
+        console.log(`✅ Found ${clinicalHistory.length} clinical history entries in Visits`);
+        return formatSuccessResponse({ success: true, clinicalHistory });
+    } catch (error) {
+        console.error(`❌ Clinical history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
+    }
+}
+
+async function fetchMedicalHistory(patientId) {
+    try {
+        console.log(`🏥 Fetching medical history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const medicalHistory = visits
+            .filter(v => v.medicalHistory || v.newHistoryEntry || v.historyDetails)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                historyDetails: v.medicalHistory || v.newHistoryEntry || v.historyDetails
+            }));
+
+        console.log(`✅ Found ${medicalHistory.length} medical history entries in Visits`);
+        return formatSuccessResponse({ success: true, medicalHistory });
+    } catch (error) {
+        console.error(`❌ Medical history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, medicalHistory: [], error: error.message });
+    }
+}
+
+async function fetchReportsHistory(patientId) {
+    try {
+        console.log(`📄 Fetching reports history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const reportsHistory = visits
+            .filter(v => v.reportNotes || v.reports)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                reportNotes: v.reportNotes || v.reports || 'No notes provided',
+                filesAttached: v.reportFiles ? v.reportFiles.length : 0
+            }));
+
+        console.log(`✅ Found ${reportsHistory.length} reports history entries in Visits`);
+        return formatSuccessResponse({ success: true, reportsHistory });
+    } catch (error) {
+        console.error(`❌ Reports history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, reportsHistory: [], error: error.message });
+    }
+}
+
+async function fetchDiagnosisHistory(patientId) {
+    try {
+        console.log(`🩺 Fetching diagnosis history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const diagnosisHistory = visits
+            .filter(v => v.diagnosis)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                diagnosis: v.diagnosis
+            }));
+
+        console.log(`✅ Found ${diagnosisHistory.length} diagnosis history entries in Visits`);
+        return formatSuccessResponse({ success: true, diagnosisHistory });
+    } catch (error) {
+        console.error(`❌ Diagnosis history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, diagnosisHistory: [], error: error.message });
+    }
+}
+
+async function fetchInvestigationsHistory(patientId) {
+    try {
+        console.log(`🔬 Fetching investigations history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const investigationsHistory = visits
+            .filter(v => (v.advisedInvestigations && v.advisedInvestigations.length > 0) || v.customInvestigations)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                investigations: v.advisedInvestigations || [],
+                customInvestigations: v.customInvestigations || ""
+            }));
+
+        console.log(`✅ Found ${investigationsHistory.length} investigations history entries in Visits`);
+        return formatSuccessResponse({ success: true, investigationsHistory });
+    } catch (error) {
+        console.error(`❌ Investigations history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, investigationsHistory: [], error: error.message });
+    }
+}
+
+async function fetchPrescriptionHistory(patientId) {
+    try {
+        console.log(`💊 Fetching prescription history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const prescriptionHistory = visits
+            .filter(v => v.medications && v.medications.length > 0)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                medications: v.medications
+            }));
+
+        console.log(`✅ Found ${prescriptionHistory.length} prescription history entries in Visits`);
+        return formatSuccessResponse({ success: true, clinicalHistory: prescriptionHistory });
+    } catch (error) {
+        console.error(`❌ Prescription history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
+    }
+}
+
+async function getAllPatients() {
+    try {
+        const result = await dynamodb.send(new ScanCommand({ TableName: PATIENTS_TABLE }));
+        const patients = result.Items || [];
+
+        console.log(`📋 Retrieved ${patients.length} patients from DynamoDB`);
+
+        // Enrich each patient's reportFiles with signed URLs
+        const enrichedPatients = await Promise.all(
+            patients.map(async (patient) => {
+                if (patient.reportFiles && Array.isArray(patient.reportFiles)) {
+                    console.log(`🔐 Enriching ${patient.reportFiles.length} files for patient: ${patient.patientId}`);
+                    patient.reportFiles = await enrichPatientFilesWithSignedUrls(patient.reportFiles);
+                }
+                return patient;
+            })
+        );
+
+        return formatSuccessResponse({
+            success: true,
+            patients: enrichedPatients,
+            count: enrichedPatients.length
+        });
+    } catch (error) {
+        console.error('ERROR getting all patients:', error);
+        return formatErrorResponse(`Failed to get patients: ${error.message}`, error);
+    }
+}
+
+async function searchPatients(requestData) {
+    try {
+        const { searchTerm } = requestData;
+
+        if (!searchTerm || searchTerm.length < 2) {
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify({
+                    success: true,
+                    patients: [],
+                    message: "Search term too short"
+                })
+            };
+        }
+
+        console.log(`🔍 Searching patients with term: "${searchTerm}"`);
+
+        const searchTermLower = searchTerm.toLowerCase().trim();
+        const searchTermClean = searchTerm.replace(/\D/g, ''); // Digits only for phone search
+        const isPhoneSearch = /^\d{8,10}$/.test(searchTermClean);
+
+        // Fetch all patients (DynamoDB Scan - for small datasets this is acceptable)
+        const result = await dynamodb.send(new ScanCommand({
+            TableName: PATIENTS_TABLE,
+            ProjectionExpression: "patientId, #n, age, sex, mobile, #s",
+            ExpressionAttributeNames: {
+                "#n": "name",
+                "#s": "status"
+            }
+        }));
+
+        const allPatients = result.Items || [];
+        console.log(`📋 Scanned ${allPatients.length} patients`);
+
+        // Filter patients based on search term
+        let matchedPatients = [];
+
+        if (isPhoneSearch) {
+            // Phone number search - exact or partial match
+            console.log(`📞 Phone search mode: ${searchTermClean}`);
+            matchedPatients = allPatients.filter(patient => {
+                const patientMobile = (patient.mobile || '').replace(/\D/g, '');
+                return patientMobile.includes(searchTermClean) || searchTermClean.includes(patientMobile);
+            });
+        } else {
+            // Name search - case-insensitive contains
+            console.log(`👤 Name search mode: ${searchTermLower}`);
+            matchedPatients = allPatients.filter(patient => {
+                const patientName = (patient.name || '').toLowerCase();
+                const patientMobile = (patient.mobile || '').replace(/\D/g, '');
+                // Match by name OR partial phone
+                return patientName.includes(searchTermLower) ||
+                    patientMobile.includes(searchTermClean);
+            });
+        }
+
+        // Format results
+        const formattedPatients = matchedPatients.map(p => ({
+            patientId: p.patientId,
+            name: p.name || 'Unknown',
+            age: p.age ? String(p.age) : '0',
+            sex: p.sex || 'N/A',
+            mobile: p.mobile || '',
+            status: p.status || 'ACTIVE'
+        }));
+
+        console.log(`✅ Found ${formattedPatients.length} matching patients`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                patients: formattedPatients,
+                count: formattedPatients.length,
+                searchType: isPhoneSearch ? 'phone' : 'name'
+            })
+        };
+    } catch (error) {
+        console.error('❌ Search error:', error);
+        return formatErrorResponse(`Search failed: ${error.message}`);
+    }
+}
+
+async function deletePatient(requestData) {
+    await dynamodb.send(new DeleteCommand({
+        TableName: PATIENTS_TABLE,
+        Key: { patientId: requestData.patientId }
+    }));
+    return formatSuccessResponse({ success: true });
+}
+
+async function updatePatientData(requestData) {
+    try {
+        const { patientId, ...updateData } = requestData;
+
+        if (!patientId) {
+            return formatErrorResponse("Missing patientId for update");
+        }
+
+        console.log(`🔄 Updating patient: ${patientId}`);
+
+        // ============================================
+        // STEP 1: Fetch existing patient data first
+        // ============================================
+        let existingPatient = null;
+        try {
+            const existingResult = await dynamodb.send(new GetCommand({
+                TableName: PATIENTS_TABLE,
+                Key: { patientId }
+            }));
+            existingPatient = existingResult.Item;
+            console.log(`📋 Fetched existing patient, has ${existingPatient?.reportFiles?.length || 0} files`);
+        } catch (fetchError) {
+            console.warn(`⚠️ Could not fetch existing patient: ${fetchError.message}`);
+            // Continue anyway - will create if not exists
+        }
+
+        // ============================================
+        // STEP 2: Deduplicate reportFiles if present
+        // ============================================
+        let fileStats = null;
+        if (updateData.reportFiles && Array.isArray(updateData.reportFiles)) {
+            const existingFiles = existingPatient?.reportFiles || [];
+            const incomingFiles = updateData.reportFiles;
+
+            console.log(`📁 Processing reportFiles update...`);
+            console.log(`   ⏭️ Existing files in DB: ${existingFiles.length}`);
+            console.log(`   📥 Incoming files from frontend: ${incomingFiles.length}`);
+
+            // Deduplicate files
+            const { mergedFiles, stats } = await deduplicateReportFiles(existingFiles, incomingFiles);
+            fileStats = stats;
+
+            // Replace updateData.reportFiles with deduplicated array
+            updateData.reportFiles = mergedFiles;
+
+            // Log the action summary
+            console.log(`✅ File deduplication result:`);
+            console.log(`   ⏭️ Skipped (already uploaded): ${stats.skipped}`);
+            console.log(`   📁 Kept (preserved existing): ${stats.kept}`);
+            console.log(`   📤 New (pending upload): ${stats.new}`);
+            console.log(`   🔧 Fixed (corrupted metadata): ${stats.fixed}`);
+            console.log(`   📊 Final file count: ${mergedFiles.length}`);
+        } else if (existingPatient?.reportFiles && !updateData.reportFiles) {
+            // If frontend didn't send reportFiles, preserve existing ones
+            console.log(`📁 No reportFiles in update, preserving existing ${existingPatient.reportFiles.length} files`);
+            // Don't add to updateData - let existing files remain unchanged
+        }
+
+        // ============================================
+        // STEP 3: Build update expression
+        // ============================================
+        const updateExpression = [];
+        const expressionAttributeNames = {};
+        const expressionAttributeValues = {};
+
+        Object.keys(updateData).forEach((key) => {
+            if (key !== 'action' && key !== 'updateMode' && key !== 'patientId') {
+                const attrName = `#${key}`;
+                const attrValue = `:${key}`;
+                updateExpression.push(`${attrName} = ${attrValue}`);
+                expressionAttributeNames[attrName] = key;
+                expressionAttributeValues[attrValue] = updateData[key];
+            }
+        });
+
+        updateExpression.push('#updatedAt = :updatedAt');
+        expressionAttributeNames['#updatedAt'] = 'updatedAt';
+        expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+
+        // ============================================
+        // VISIT LOCK: Mark visit as completed when this is a final prescription save
+        // isPartialSave === false means the doctor clicked Save/Update on the Prescription tab
+        // ============================================
+        const isFinalPrescriptionSave = updateData.isPartialSave === false ||
+            updateData.saveSection === 'prescription';
+
+        if (isFinalPrescriptionSave) {
+            const todayDate = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+            console.log(`🔒 Final prescription save detected. Locking visit for date: ${todayDate}`);
+            updateExpression.push('#lastLockedVisitDate = :lastLockedVisitDate');
+            expressionAttributeNames['#lastLockedVisitDate'] = 'lastLockedVisitDate';
+            expressionAttributeValues[':lastLockedVisitDate'] = todayDate;
+
+            updateExpression.push('#visitCompletedAt = :visitCompletedAt');
+            expressionAttributeNames['#visitCompletedAt'] = 'visitCompletedAt';
+            expressionAttributeValues[':visitCompletedAt'] = new Date().toISOString();
+        }
+
+        // ============================================
+        // STEP 4: Execute conditional update
+        // ============================================
+        const params = {
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: `SET ${updateExpression.join(', ')}`,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await dynamodb.send(new UpdateCommand(params));
+        console.log(`✅ Patient updated: ${patientId}`);
+
+        // Return response with file stats if applicable
+        const response = {
+            success: true,
+            patientId,
+            updatedFields: Object.keys(updateData).filter(k => k !== 'action' && k !== 'updateMode')
+        };
+
+        if (fileStats) {
+            response.fileStats = fileStats;
+            response.message = `Updated with ${fileStats.kept} existing files preserved, ${fileStats.new} new files added`;
+        }
+
+        return formatSuccessResponse(response);
+    } catch (error) {
+        console.error('❌ Error updating patient:', error);
+        return formatErrorResponse(`Failed to update patient: ${error.message}`);
+    }
+}
+
+async function processSectionSave(requestData) {
+    try {
+        const { patientId, section, ...sectionData } = requestData;
+
+        if (!patientId || !section) {
+            return formatErrorResponse("Missing patientId or section");
+        }
+
+        console.log(`💾 Saving ${section} section for patient: ${patientId}`);
+
+        // Build update expression for the specific section
+        const updateExpression = [];
+        const expressionAttributeNames = {};
+        const expressionAttributeValues = {};
+
+        Object.keys(sectionData).forEach((key) => {
+            if (key !== 'action' && key !== 'isPartialSave' && key !== 'section' && key !== 'patientId') {
+                const attrName = `#${key}`;
+                const attrValue = `:${key}`;
+                updateExpression.push(`${attrName} = ${attrValue}`);
+                expressionAttributeNames[attrName] = key;
+                expressionAttributeValues[attrValue] = sectionData[key];
+            }
+        });
+
+        if (updateExpression.length === 0) {
+            return formatSuccessResponse({
+                success: true,
+                patientId,
+                message: "No changes to save"
+            });
+        }
+
+        updateExpression.push('#updatedAt = :updatedAt');
+        expressionAttributeNames['#updatedAt'] = 'updatedAt';
+        expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+
+        const params = {
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: `SET ${updateExpression.join(', ')}`,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ReturnValues: 'UPDATED_NEW'
+        };
+
+        await dynamodb.send(new UpdateCommand(params));
+        console.log(`✅ Section saved: ${section} for ${patientId}`);
+
+        return formatSuccessResponse({
+            success: true,
+            patientId,
+            section,
+            message: `${section} section saved successfully`
+        });
+    } catch (error) {
+        console.error('❌ Error saving section:', error);
+        return formatErrorResponse(`Failed to save section: ${error.message}`);
+    }
+}
+
+async function processPatientData(requestData) {
+    try {
+        const { name, age, sex, mobile, address, patientId: providedPatientId } = requestData;
+
+        // Validate required fields - only 'name' is strictly required for the initial record
+        if (!name) {
+            return formatErrorResponse("Missing required field: name (fullName)");
+        }
+
+        console.log("🆕 Creating new patient...");
+
+        // Generate patient ID if not provided
+        const newPatientId = providedPatientId || `patient_${randomUUID().split('-')[0]}`;
+
+        // Create patient record
+        const patientRecord = {
+            patientId: newPatientId,
+            name,
+            age: parseInt(age),
+            sex,
+            mobile: mobile || "",
+            address: address || "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            reportFiles: [],
+            medications: [],
+            clinicalParameters: {},
+            diagnosis: "",
+            treatment: "",
+            prescription: "",
+            advisedInvestigations: ""
+        };
+
+        const params = {
+            TableName: PATIENTS_TABLE,
+            Item: patientRecord
+        };
+
+        await dynamodb.send(new PutCommand(params));
+        console.log(`✅ Patient created: ${newPatientId}`);
+
+        return formatSuccessResponse({
+            success: true,
+            patientId: newPatientId,
+            message: "Patient created successfully"
+        });
+    } catch (error) {
+        console.error('❌ Error creating patient:', error);
+        return formatErrorResponse(`Failed to create patient: ${error.message}`);
+    }
+}
+
+/**
+ * Initiate a new visit (Assistant Intake)
+ * Creates a record in the Visits table with status WAITING
+ */
+async function initiateVisit(requestData) {
+    try {
+        const { patientId, name, age, sex, mobile, address } = requestData;
+        
+        if (!patientId) {
+            return formatErrorResponse("Missing patientId");
+        }
+
+        const visitId = `visit_${randomUUID()}`;
+        
+        const visitItem = {
+            visitId,
+            patientId,
+            status: 'WAITING',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            // Chronic data context
+            name,
+            age: age ? parseInt(age) : 0,
+            sex,
+            mobile: mobile || "",
+            address: address || "",
+            // Acute fields initialized
+            diagnosis: "",
+            medications: [],
+            clinicalParameters: {},
+            reportFiles: [],
+            advisedInvestigations: []
+        };
+
+        console.log(`🎬 Initiating visit ${visitId} for patient ${patientId}`);
+
+        await dynamodb.send(new PutCommand({
+            TableName: VISITS_TABLE,
+            Item: visitItem
+        }));
+
+        return formatSuccessResponse({
+            success: true,
+            visitId,
+            message: "Visit initiated successfully"
+        });
+    } catch (error) {
+        console.error('❌ Error initiating visit:', error);
+        return formatErrorResponse(`Failed to initiate visit: ${error.message}`);
+    }
+}
+
+/**
+ * Retrieves the active visit for a patient
+ * Queries for WAITING or IN_PROGRESS status
+ */
+async function handleGetWaitingRoom() {
+    try {
+        console.log(`📡 Fetching Waiting Room Queue from Visits table...`);
+
+        const params = {
+            TableName: VISITS_TABLE,
+            IndexName: 'status-createdAt-index',
+            KeyConditionExpression: "#s = :waiting",
+            ExpressionAttributeNames: {
+                "#s": "status"
+            },
+            ExpressionAttributeValues: {
+                ":waiting": "WAITING"
+            },
+            ScanIndexForward: true // Auto-sort by arrival time
+        };
+
+        const result = await dynamodb.send(new QueryCommand(params));
+        const visits = result.Items || [];
+
+        console.log(`✅ Found ${visits.length} patients in Waiting Room`);
+
+        return formatSuccessResponse({
+            success: true,
+            patients: visits,
+            count: visits.length
+        });
+    } catch (error) {
+        console.error('ERROR getting waiting room:', error);
+        return formatErrorResponse(`Failed to get waiting room: ${error.message}`, error);
+    }
+}
+
+async function getActiveVisit(patientId) {
+    try {
+        if (!patientId) return formatErrorResponse("Missing patientId");
+
+        console.log(`🔍 Checking for active visit for patient: ${patientId}`);
+
+        // We check for WAITING or IN_PROGRESS using the GSI
+        const statuses = ['WAITING', 'IN_PROGRESS'];
+        let activeVisit = null;
+
+        for (const status of statuses) {
+            const result = await dynamodb.send(new QueryCommand({
+                TableName: VISITS_TABLE,
+                IndexName: 'patientId-status-index',
+                KeyConditionExpression: 'patientId = :pid AND #status = :s',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: { ':pid': patientId, ':s': status }
+            }));
+
+            if (result.Items && result.Items.length > 0) {
+                activeVisit = result.Items[0];
+                break;
+            }
+        }
+
+        return formatSuccessResponse({
+            success: true,
+            activeVisit
+        });
+    } catch (error) {
+        console.error('❌ Error getting active visit:', error);
+        return formatErrorResponse(`Failed to get active visit: ${error.message}`);
+    }
+}
+/**
+ * Updates ONLY the status of a visit (e.g., WAITING -> IN_PROGRESS)
+ * Used to immediately remove patients from the Assistant's Waiting Room queue
+ */
+async function updateVisitStatus(requestData) {
+    try {
+        const { visitId, status } = requestData;
+
+        if (!visitId || !status) {
+            return formatErrorResponse("Missing visitId or status");
+        }
+
+        console.log(`🔄 Updating visit ${visitId} status to ${status}`);
+
+        const params = {
+            TableName: VISITS_TABLE,
+            Key: { visitId },
+            UpdateExpression: "SET #status = :s, updatedAt = :t",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: {
+                ":s": status,
+                ":t": new Date().toISOString()
+            }
+        };
+
+        await dynamodb.send(new UpdateCommand(params));
+        
+        return formatSuccessResponse({
+            success: true,
+            message: `Visit status updated to ${status}`
+        });
+    } catch (error) {
+        console.error('❌ Error updating visit status:', error);
+        return formatErrorResponse(`Failed to update status: ${error.message}`);
+    }
+}
+
+/**
+ * Completes a visit (Doctor Consultation)
+ * Atomically marks visit as COMPLETED, saves final clinical data, and appends snapshot to Master record
+ */
+async function completeVisit(requestData) {
+    try {
+        // FIX 1: Correctly extract the explicitly nested acuteData object
+        const { visitId, patientId, acuteData = {} } = requestData;
+
+        if (!visitId || !patientId) {
+            return formatErrorResponse("Missing visitId or patientId");
+        }
+
+        const timestamp = new Date().toISOString();
+        console.log(`🏁 Completing visit ${visitId} for patient ${patientId}`);
+
+        // Prepare snapshot for Master record
+        const visitSummary = {
+            visitId,
+            date: timestamp,
+            diagnosis: acuteData.diagnosis || "",
+            medications: acuteData.medications || [],
+            vitalsSummary: acuteData.clinicalParameters || {}
+        };
+
+        const params = {
+            TransactItems: [
+                {
+                    // FIX 2: Update the Visits table with the Doctor's final edits AND the status
+                    Update: {
+                        TableName: VISITS_TABLE,
+                        Key: { visitId },
+                        UpdateExpression: 'SET #status = :c, updatedAt = :t, completedAt = :t, diagnosis = :diag, medications = :meds, clinicalParameters = :vitals, reportNotes = :reports, medicalHistory = :hist, advisedInvestigations = :inv',
+                        ExpressionAttributeNames: { '#status': 'status' },
+                        ExpressionAttributeValues: { 
+                            ':c': 'COMPLETED', 
+                            ':t': timestamp,
+                            ':diag': acuteData.diagnosis || "",
+                            ':meds': acuteData.medications || [],
+                            ':vitals': acuteData.clinicalParameters || {},
+                            ':reports': acuteData.reports || acuteData.reportNotes || "",
+                            ':hist': acuteData.newHistoryEntry || acuteData.medicalHistory || "",
+                            ':inv': acuteData.advisedInvestigations || ""
+                        }
+                    }
+                },
+                {
+                    // Append to Patient Master visitHistory (Safe null handling)
+                    Update: {
+                        TableName: PATIENTS_TABLE,
+                        Key: { patientId },
+                        UpdateExpression: 'SET visitHistory = list_append(if_not_exists(visitHistory, :empty_list), :new_visit), updatedAt = :t',
+                        ExpressionAttributeValues: {
+                            ':new_visit': [visitSummary],
+                            ':empty_list': [],
+                            ':t': timestamp
+                        }
+                    }
+                }
+            ]
+        };
+
+        await dynamodb.send(new TransactWriteCommand(params));
+        console.log(`✅ Visit ${visitId} completed and archived to master`);
+
+        return formatSuccessResponse({
+            success: true,
+            message: "Visit completed and archived successfully"
+        });
+    } catch (error) {
+        console.error('❌ Error completing visit:', error);
+        return formatErrorResponse(`Failed to complete visit: ${error.message}`);
+    }
+}
+
+/**
+ * Updates an existing visit record
+ */
+async function updateVisit(requestData) {
+    try {
+        const { visitId, ...updateData } = requestData;
+
+        if (!visitId) {
+            return formatErrorResponse("Missing visitId for update");
+        }
+
+        console.log(`🔄 Updating visit: ${visitId}`);
+
+        const updateExpression = [];
+        const expressionAttributeNames = {};
+        const expressionAttributeValues = {};
+
+        Object.keys(updateData).forEach((key) => {
+            if (key !== 'action' && key !== 'visitId' && key !== 'patientId') {
+                const attrName = `#${key}`;
+                const attrValue = `:${key}`;
+                updateExpression.push(`${attrName} = ${attrValue}`);
+                expressionAttributeNames[attrName] = key;
+                expressionAttributeValues[attrValue] = updateData[key];
+            }
+        });
+
+        if (updateExpression.length === 0) {
+            return formatSuccessResponse({ success: true, message: "No changes to update" });
+        }
+
+        updateExpression.push('#updatedAt = :updatedAt');
+        expressionAttributeNames['#updatedAt'] = 'updatedAt';
+        expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+
+        const params = {
+            TableName: VISITS_TABLE,
+            Key: { visitId },
+            UpdateExpression: `SET ${updateExpression.join(', ')}`,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await dynamodb.send(new UpdateCommand(params));
+        console.log(`✅ Visit updated: ${visitId}`);
+
+        return formatSuccessResponse({
+            success: true,
+            visitId,
+            updatedVisit: result.Attributes
+        });
+    } catch (error) {
+        console.error('❌ Error updating visit:', error);
+        return formatErrorResponse(`Failed to update visit: ${error.message}`);
+    }
+}
+
+
+
+// ============================================
+// FITNESS CERTIFICATE OPERATIONS
+// ============================================
+
+async function saveFitnessCertificate(requestData) {
+    try {
+        const { patientId, data } = requestData;
+
+        if (!patientId || !data || !data.certificateId) {
+            return formatErrorResponse("Missing required fields: patientId, data.certificateId");
+        }
+
+        console.log(`💾 Saving fitness certificate for patient: ${patientId}, ID: ${data.certificateId}`);
+
+        // Get current patient to append to list
+        const patientResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!patientResult.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        const currentCertificates = patientResult.Item.fitnessCertificates || [];
+
+        // Check if certificate exists (by ID) to support updates vs inserts
+        const exists = currentCertificates.some(cert => cert.certificateId === data.certificateId);
+
+        let updatedCertificates;
+        if (exists) {
+            console.log(`⚠️ Certificate ${data.certificateId} already exists, updating it.`);
+            updatedCertificates = currentCertificates.map(cert =>
+                cert.certificateId === data.certificateId ? { ...data, updatedAt: new Date().toISOString() } : cert
+            );
+        } else {
+            // Prepend new certificate to keep latest first
+            updatedCertificates = [data, ...currentCertificates];
+        }
+
+        // Update Patient Record
+        await dynamodb.send(new UpdateCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: "SET fitnessCertificates = :certs, updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":certs": updatedCertificates,
+                ":updatedAt": new Date().toISOString()
+            }
+        }));
+
+        console.log(`✅ Fitness Certificate saved successfully. Total count: ${updatedCertificates.length}`);
+
+        return formatSuccessResponse({
+            success: true,
+            certificateId: data.certificateId,
+            message: "Certificate saved successfully"
+        });
+
+    } catch (error) {
+        console.error('❌ Error saving fitness certificate:', error);
+        return formatErrorResponse(`Failed to save certificate: ${error.message}`);
+    }
+}
+
+async function getFitnessCertificates(patientId) {
+    try {
+        console.log(`📜 Fetching fitness certificates for: ${patientId}`);
+
+        const result = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            ProjectionExpression: "fitnessCertificates" // Only fetch certificates
+        }));
+
+        if (!result.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        const certificates = result.Item.fitnessCertificates || [];
+        console.log(`✅ Found ${certificates.length} fitness certificates`);
+
+        return formatSuccessResponse({
+            success: true,
+            certificates: certificates
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching fitness certificates:', error);
+        return formatErrorResponse(`Failed to fetch certificates: ${error.message}`);
+    }
+}
+
+
+// ============================================
+// DYNAMIC MEDICINE MASTER LOGIC
+// ============================================
+
+/**
+ * Normalizes medicine name for consistent storage and search
+ * TRIMS whitespace -> COLLAPSES multiple spaces -> UPPERCASE
+ * Example: "  para   500 " -> "PARA 500"
+ */
+function normalizeMedicineName(name) {
+    if (!name) return "";
+    return name
+        .trim()
+        .replace(/\s+/g, ' ') // Collapse multiple spaces to single
+        .toUpperCase();
+}
+
+/**
+ * Searches for medicines using prefix search
+ * Input: { query: "par" }
+ * Output: ["PARA 500", "PARACETAMOL"]
+ */
+async function searchMedicines(requestData) {
+    try {
+        const { query } = requestData;
+        if (!query || query.length < 1) { // Relaxed check
+            return {
+                statusCode: 200,
+                body: JSON.stringify({ medicines: [] })
+            };
+        }
+
+        const normalizedQuery = normalizeMedicineName(query);
+        console.log(`🔍 Searching medicines with prefix: ${normalizedQuery}`);
+
+        const command = new QueryCommand({
+            TableName: "Medicines", // Constant table name
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+            ExpressionAttributeValues: {
+                ":pk": "MEDICINE",
+                ":sk": normalizedQuery
+            },
+            Limit: 20 // Performance limit
+        });
+
+        const result = await dynamodb.send(command);
+
+        // Extract just the display name
+        const medicines = (result.Items || []).map(item => item.name);
+
+        return formatSuccessResponse({
+            success: true,
+            medicines: medicines
+        });
+
+    } catch (error) {
+        console.error("❌ Error searching medicines:", error);
+        return formatSuccessResponse({ success: false, error: error.message }); // Return 200 with error to avoid 500 crash
+    }
+}
+
+/**
+ * Adds a new medicine to the master database
+ * Input: { name: "Azithral 500" }
+ * Output: Success
+ */
+async function addMedicine(requestData) {
+    try {
+        const { name } = requestData;
+        if (!name) return formatErrorResponse("Medicine name is required");
+
+        const normalizedSK = normalizeMedicineName(name);
+        const displayName = name.trim().replace(/\s+/g, ' ');
+
+        const params = {
+            TableName: "Medicines",
+            Item: {
+                PK: "MEDICINE",
+                SK: normalizedSK,
+                name: displayName,
+                createdAt: new Date().toISOString()
+            },
+            ConditionExpression: "attribute_not_exists(SK)" // Prevent overwrite
+        };
+
+        try {
+            await dynamodb.send(new PutCommand(params));
+            console.log(`✅ Added new medicine: ${normalizedSK}`);
+
+            return formatSuccessResponse({
+                success: true,
+                medicine: { name: displayName }
+            });
+
+        } catch (dbError) {
+            if (dbError.name === "ConditionalCheckFailedException") {
+                console.log(`ℹ️ Medicine already exists: ${normalizedSK}`);
+                return formatSuccessResponse({
+                    success: true,
+                    message: "Medicine already exists",
+                    medicine: { name: displayName }
+                });
+            }
+            console.error("❌ DynamoDB error:", dbError);
+            throw dbError; // Rethrow so main catch handles it
+        }
+
+    } catch (error) {
+        console.error("❌ Error adding medicine:", error);
+        return formatErrorResponse(`Add failed: ${error.message}`);
+    }
+}

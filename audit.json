@@ -1,0 +1,57 @@
+{
+  "PATIENTS_TABLE": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> patientResult (GetCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> command (GetItemCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> command (ScanCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> result (ScanCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> existingResult (GetCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> result (GetCommand)"
+    ],
+    "Writes": [
+      "lambdaForCreateAsWellAsUpdate.js -> currentFiles (UpdateCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> fileToDelete (UpdateCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> deletePatient (DeleteCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> exists (UpdateCommand)"
+    ]
+  },
+  "VISITS_TABLE": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> command (QueryCommand)",
+      "lambdaForCreateAsWellAsUpdate.js -> result (QueryCommand)"
+    ],
+    "Writes": [
+      "lambdaForCreateAsWellAsUpdate.js -> visitItem (PutCommand)"
+    ]
+  },
+  "CLINICAL_HISTORY_TABLE": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> result (QueryCommand)"
+    ],
+    "Writes": []
+  },
+  "MEDICAL_HISTORY_TABLE": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> result (QueryCommand)"
+    ],
+    "Writes": []
+  },
+  "DIAGNOSIS_HISTORY_TABLE": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> result (QueryCommand)"
+    ],
+    "Writes": []
+  },
+  "INVESTIGATIONS_HISTORY_TABLE": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> result (QueryCommand)"
+    ],
+    "Writes": []
+  },
+  "Medicines": {
+    "Reads": [
+      "lambdaForCreateAsWellAsUpdate.js -> command (QueryCommand)"
+    ],
+    "Writes": []
+  }
+}
