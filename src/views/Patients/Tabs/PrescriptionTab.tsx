@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Pill, Printer, Share2, FileText, Clock, Activity, X } from 'lucide-react';
+import { Pill, Printer, Share2, FileText, Clock, Activity, X, Eye, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { SmartPrescriptionEngine } from '../../../components/Common/SmartPrescriptionEngine';
 import { generatePrescriptionHTML } from '../../../utils/PrescriptionPdfTemplate';
 import { generateAndSharePrescription } from '../../../utils/PdfGenerator';
 import { HistoryModal } from '../../../components/Common/HistoryModal';
+import { ImageZoomModal } from '../../../components/Common/ImageZoomModal';
 
 interface PrescriptionTabProps {
   formData: any;
@@ -43,6 +44,15 @@ const PdfOptionsDialog = ({ isOpen, onClose, onGenerate }: any) => {
 // The RN Context Chip Array & Zero-Jank Modals
 const VisitContextSummary = ({ formData }: { formData: any }) => {
    const [activeModal, setActiveModal] = useState<string | null>(null);
+   const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
+
+   /** Resolve the best viewable URL for a report file */
+   const resolveViewUrl = (f: any): string | null =>
+     f.s3Url || f.url || f.fileUrl || (f.previewUri?.startsWith('blob:') ? f.previewUri : null) || null;
+
+   const isImageFile = (f: any): boolean =>
+     (f.type === 'image' || (f.file?.type || '').startsWith('image/') ||
+     /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''));
 
    return (
       <div className="bg-gradient-to-br from-blue-50/80 to-indigo-50/80 border border-blue-100/60 rounded-2xl p-4 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] animate-in slide-in-from-top-4 duration-500 mb-6 relative overflow-hidden">
@@ -109,14 +119,49 @@ const VisitContextSummary = ({ formData }: { formData: any }) => {
                        <h3 className="font-bold text-lg flex items-center gap-2"><FileText className="w-5 h-5 text-emerald-600"/> Uploaded Reports</h3>
                        <button onClick={() => setActiveModal(null)} className="p-1.5 bg-white hover:bg-gray-100 border border-gray-100 rounded-lg shadow-sm transition-colors"><X className="w-5 h-5 text-gray-500"/></button>
                     </div>
-                    <div className="p-6">
+                    <div className="p-4 max-h-[60vh] overflow-y-auto">
                        {(formData.reportFiles && formData.reportFiles.length > 0) ? (
-                          <div className="space-y-3">
-                            {formData.reportFiles.map((f:any, i:number) => (
-                               <div key={i} className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100 font-bold text-sm text-emerald-900 flex items-center gap-3">
-                                  <FileText className="w-5 h-5 text-emerald-500"/> {f.name}
-                               </div>
-                            ))}
+                          <div className="space-y-2">
+                            {formData.reportFiles.map((f: any, i: number) => {
+                               const img = isImageFile(f);
+                               const url = resolveViewUrl(f);
+                               return (
+                                  <div key={i} className="flex items-center justify-between p-3.5 bg-emerald-50/60 rounded-xl border border-emerald-100 gap-3">
+                                     <div className="flex items-center gap-3 min-w-0">
+                                        <div className="p-1.5 bg-white rounded-lg border border-emerald-100 shrink-0">
+                                           {img
+                                             ? <ImageIcon className="w-4 h-4 text-emerald-500" />
+                                             : <FileText className="w-4 h-4 text-emerald-500" />}
+                                        </div>
+                                        <p className="text-xs font-bold text-emerald-900 truncate">{f.name}</p>
+                                     </div>
+                                     {/* Action button: Eye for images, Open for documents */}
+                                     {url ? (
+                                        img ? (
+                                           <button
+                                              onClick={() => setZoomedUrl(url)}
+                                              className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
+                                              title="View full size"
+                                           >
+                                              <Eye className="w-3.5 h-3.5" /> View
+                                           </button>
+                                        ) : (
+                                           <button
+                                              onClick={() => window.open(url, '_blank')}
+                                              className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
+                                              title="Open file"
+                                           >
+                                              <ExternalLink className="w-3.5 h-3.5" /> Open
+                                           </button>
+                                        )
+                                     ) : (
+                                        <span className="shrink-0 text-[10px] text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg border border-amber-100">
+                                           Pending upload
+                                        </span>
+                                     )}
+                                  </div>
+                               );
+                            })}
                           </div>
                        ) : <p className="text-sm font-bold text-gray-400 text-center py-6">No reports uploaded for this session.</p>}
                     </div>
@@ -146,6 +191,8 @@ const VisitContextSummary = ({ formData }: { formData: any }) => {
                  </div>
              </div>
          )}
+         {/* Image Zoom Viewer — shared with the reports modal above */}
+         <ImageZoomModal imageUrl={zoomedUrl} onClose={() => setZoomedUrl(null)} />
       </div>
    );
 };

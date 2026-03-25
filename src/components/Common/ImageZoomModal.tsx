@@ -44,15 +44,24 @@ export const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClos
     }
   }, []);
 
-  // ── Manual zoom buttons ───────────────────────────────────────────────────
-  const zoom = (factor: number) => {
-    if (pinchZoomRef.current) {
-      const current = pinchZoomRef.current;
-      if (current.scaleTo) {
-        const nextScale = Math.min(Math.max((current.getCurrentScale?.() ?? 1) + factor, 0.5), 5);
-        current.scaleTo({ x: 0, y: 0, scale: nextScale });
-      }
+  // ── Center the image once it has loaded ──────────────────────────────────
+  // react-quick-pinch-zoom initialises at (0,0) before it knows the image
+  // dimensions, so we call alignCenter() after load to snap it to the middle.
+  const handleImageLoad = useCallback(() => {
+    if (pinchZoomRef.current?.alignCenter) {
+      pinchZoomRef.current.alignCenter({ x: 0.5, y: 0.5 });
     }
+  }, []);
+
+  // ── Manual zoom buttons (scale from viewport center) ─────────────────────
+  const zoom = (factor: number) => {
+    const pz = pinchZoomRef.current;
+    if (!pz) return;
+    const container = pz.inner?.parentElement as HTMLElement | null;
+    const cx = (container?.clientWidth  ?? window.innerWidth)  / 2;
+    const cy = (container?.clientHeight ?? window.innerHeight) / 2;
+    const nextScale = Math.min(Math.max((pz.getCurrentScale?.() ?? 1) + factor, 0.5), 5);
+    pz.scaleTo?.({ x: cx, y: cy, scale: nextScale });
   };
 
   if (!imageUrl) return null;
@@ -121,6 +130,7 @@ export const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClos
               ref={imgRef}
               src={imageUrl}
               alt="Report"
+              onLoad={handleImageLoad}
               onError={() => setImgError(true)}
               style={{
                 maxWidth: '90vw',

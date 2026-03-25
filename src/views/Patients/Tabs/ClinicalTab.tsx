@@ -3,7 +3,9 @@ import { FileText, Image as ImageIcon, X, Eye, Upload, Calendar, Clock } from 'l
 import { AutoBulletTextArea } from '../../../components/Common/AutoBulletTextArea';
 import { HistorySidebar } from '../../../components/Common/HistorySidebar';
 import { ImageZoomModal } from '../../../components/Common/ImageZoomModal';
+import { ViewUploadedFilesPanel } from '../../../components/Common/ViewUploadedFilesPanel';
 import type { HistoryRecord } from '../../../components/Common/HistorySidebar';
+import type { LocalReportFile } from '../../../services/uploadService';
 import { apiClient } from '../../../services/api/apiClient';
 
 interface ClinicalTabProps {
@@ -168,8 +170,8 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
 export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData, patientId }) => {
   const [expanded, setExpanded] = useState({ history: true, reports: true, params: true });
   const [isCompareMode, setIsCompareMode] = useState(false);
-
   const [isClinicalHistoryOpen, setIsClinicalHistoryOpen] = useState(false);
+  const [isReportPanelOpen, setIsReportPanelOpen] = useState(false);
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
   
   const [historyData, setHistoryData] = useState<HistoryRecord[]>([]);
@@ -273,20 +275,19 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
     setFormData({ ...formData, [field]: value });
 
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const documentInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    const newFiles = files.map(file => ({
+    const newFiles: LocalReportFile[] = files.map(file => ({
       id: Math.random().toString(36).substring(7),
       file,
       name: file.name,
       size: (file.size / 1024 / 1024).toFixed(2) + ' MB',
       type: file.type.startsWith('image/') ? 'image' : 'document',
-      previewUri: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+      previewUri: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
     }));
-    const current = formData.reportFiles || [];
+    const current: LocalReportFile[] = formData.reportFiles || [];
     setFormData({ ...formData, reportFiles: [...current, ...newFiles] });
     e.target.value = '';
   };
@@ -378,8 +379,15 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
             onChange={e => handleChange('reports', e.target.value)}
           />
 
-          <input type="file" accept="image/*" capture="environment" multiple className="hidden" ref={imageInputRef} onChange={handleFileSelect} />
-          <input type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword" multiple className="hidden" ref={documentInputRef} onChange={handleFileSelect} />
+          {/* Single combined file input: accepts images, PDFs, Word docs */}
+          <input
+            type="file"
+            accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            multiple
+            className="hidden"
+            ref={imageInputRef}
+            onChange={handleFileSelect}
+          />
 
           <button
             type="button"
@@ -436,6 +444,7 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
 
           <button
             type="button"
+            onClick={() => setIsReportPanelOpen(true)}
             className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-sm transition-colors"
           >
             <div className="p-1 bg-indigo-700 text-white rounded">
@@ -532,6 +541,15 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
         title={historyModalTitle}
         records={historyData}
         isLoading={isLoadingHistory}
+      />
+
+      {/* ── Historical & Pending Files Viewer ── */}
+      <ViewUploadedFilesPanel
+        isOpen={isReportPanelOpen}
+        onClose={() => setIsReportPanelOpen(false)}
+        patientId={patientId}
+        localFiles={formData.reportFiles || []}
+        onZoomImage={url => setZoomedImageUrl(url)}
       />
 
       {/* ── Image Zoom Viewer ── */}

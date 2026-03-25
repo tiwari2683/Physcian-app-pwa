@@ -1,0 +1,378 @@
+import { useState, useEffect } from 'react';
+import { FileText, Image as ImageIcon, ExternalLink, Eye, X, Loader2, Cloud, Clock, RefreshCw } from 'lucide-react';
+import type { LocalReportFile } from '../../services/uploadService';
+import { apiClient } from '../../services/api/apiClient';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface S3FileRow {
+  url: string;        // Presigned GET URL already embedded by Lambda enrichPatientFilesWithSignedUrls
+  name: string;
+  type: string;       // MIME type e.g. "image/jpeg", "application/pdf"
+  size?: number;
+  category?: string;
+  dateAdded?: string;
+  isS3: true;
+}
+
+interface PendingFileRow {
+  previewUri: string | null;
+  name: string;
+  type: 'image' | 'document';
+  size: string;
+  isPending: true;
+}
+
+type Filter = 'all' | 'cloud' | 'pending';
+
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+  /** undefined for brand-new (draft_) patients — skips the getPatient fetch */
+  patientId?: string;
+  /** Files picked this session, held in formData */
+  localFiles: LocalReportFile[];
+  /** Fires with a presigned URL — opens the existing ImageZoomModal in ClinicalTab */
+  onZoomImage: (url: string) => void;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const parseResponse = (data: unknown) => {
+  const d = data as Record<string, unknown>;
+  if (d?.body) return typeof d.body === 'string' ? JSON.parse(d.body) : d.body;
+  return d;
+};
+
+function guessType(name: string): string {
+  const ext = (name.split('.').pop() ?? '').toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image/jpeg';
+  if (ext === 'pdf') return 'application/pdf';
+  return 'application/octet-stream';
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }); }
+  catch { return iso; }
+}
+
+const isImage = (type: string) =>
+  type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp'].some(e => type.includes(e));
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export const ViewUploadedFilesPanel: React.FC<Props> = ({
+  isOpen,
+  onClose,
+  patientId,
+  localFiles,
+  onZoomImage,
+}) => {
+  const [s3Files, setS3Files] = useState<S3FileRow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+
+  // ── Fetch historical S3 files whenever panel opens ──────────────────────────
+  const fetchS3Files = async () => {
+    if (!patientId || patientId.startsWith('draft_')) {
+      // New patient — no history yet, skip API call
+      setS3Files([]);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await apiClient.post('/patient-data', {
+        action: 'getPatient',
+        patientId,
+      });
+      const data = parseResponse(response.data) as Record<string, unknown>;
+      const patient = (data.patient ?? data) as Record<string, unknown>;
+      const files: unknown[] = Array.isArray(patient.reportFiles) ? patient.reportFiles : [];
+
+      // Lambda's enrichPatientFilesWithSignedUrls populates file.url / file.signedUrl
+      const rows: S3FileRow[] = files.map((f: unknown) => {
+        const file = f as Record<string, unknown>;
+        const name = String(file.name ?? file.key ?? 'Unknown file');
+        return {
+          url: String(file.url ?? file.signedUrl ?? ''),
+          name,
+          type: String(file.type ?? guessType(name)),
+          size: typeof file.size === 'number' ? file.size : undefined,
+          category: file.category ? String(file.category) : undefined,
+          dateAdded: file.uploadDate ? String(file.uploadDate) : undefined,
+          isS3: true,
+        };
+      });
+
+      setS3Files(rows);
+    } catch (err) {
+      console.error('[ViewUploadedFilesPanel] fetch failed', err);
+      setError('Could not load cloud files. Check your connection and retry.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchS3Files();
+      setFilter('all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, patientId]);
+
+  // ── Build pending (locally picked, not yet uploaded) rows ───────────────────
+  const pendingFiles: PendingFileRow[] = localFiles
+    .filter(f => !f.uploadedToS3 && f.file)
+    .filter(f => !s3Files.some(s => s.name === f.name)) // skip if already in S3
+    .map(f => ({
+      previewUri: f.previewUri,
+      name: f.name,
+      type: f.type,
+      size: f.size,
+      isPending: true,
+    }));
+
+  // ── Filter ──────────────────────────────────────────────────────────────────
+  const visibleS3 = filter !== 'pending' ? s3Files : [];
+  const visiblePending = filter !== 'cloud' ? pendingFiles : [];
+  const totalAll = s3Files.length + pendingFiles.length;
+
+  if (!isOpen) return null;
+
+  return (
+    // Backdrop
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      onClick={onClose}
+    >
+      {/* Dark overlay */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+
+      {/* Panel */}
+      <div
+        className="relative z-10 w-full sm:max-w-lg mx-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[85vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">Uploaded Files</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {s3Files.length} in cloud · {pendingFiles.length} pending upload
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Filter tabs */}
+        <div className="flex gap-1 px-5 py-3 border-b border-gray-50 shrink-0">
+          {(['all', 'cloud', 'pending'] as Filter[]).map(tab => {
+            const count = tab === 'all' ? totalAll : tab === 'cloud' ? s3Files.length : pendingFiles.length;
+            const label = tab === 'all' ? 'All' : tab === 'cloud' ? '☁ Cloud' : '⏳ Pending';
+            return (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  filter === tab
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                {label}
+                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
+                  filter === tab ? 'bg-white/20' : 'bg-white'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            onClick={fetchS3Files}
+            disabled={isLoading}
+            className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-40"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2">
+          {isLoading && s3Files.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+              <p className="text-sm">Loading cloud files…</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3 text-center">
+              <p className="text-sm text-red-500">{error}</p>
+              <button
+                onClick={fetchS3Files}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" /> Retry
+              </button>
+            </div>
+          ) : (visibleS3.length + visiblePending.length) === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-400">
+              <FileText className="w-10 h-10 text-gray-200" />
+              <p className="text-sm font-medium">
+                {filter === 'cloud' ? 'No files in the cloud yet' :
+                 filter === 'pending' ? 'No pending files' :
+                 'No files uploaded yet'}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* ── Cloud files (S3) ── */}
+              {visibleS3.length > 0 && (
+                <div>
+                  {filter === 'all' && (
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+                      ☁ Cloud Storage
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    {visibleS3.map((file, idx) => (
+                      <FileCard
+                        key={`s3-${idx}`}
+                        name={file.name}
+                        type={file.type}
+                        meta={[
+                          file.size ? formatBytes(file.size) : null,
+                          file.category ?? null,
+                          file.dateAdded ? formatDate(file.dateAdded) : null,
+                        ].filter(Boolean).join(' · ')}
+                        badge={<CloudBadge />}
+                        actions={
+                          isImage(file.type) ? (
+                            <button
+                              onClick={() => file.url && onZoomImage(file.url)}
+                              disabled={!file.url}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> View
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => file.url && window.open(file.url, '_blank')}
+                              disabled={!file.url}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" /> Open
+                            </button>
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Pending files (local, not yet uploaded) ── */}
+              {visiblePending.length > 0 && (
+                <div className={visibleS3.length > 0 && filter === 'all' ? 'mt-4' : ''}>
+                  {filter === 'all' && (
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+                      ⏳ Pending Upload
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    {visiblePending.map((file, idx) => (
+                      <FileCard
+                        key={`local-${idx}`}
+                        name={file.name}
+                        type={file.type === 'image' ? 'image/jpeg' : 'application/pdf'}
+                        meta={file.size}
+                        badge={<PendingBadge />}
+                        actions={
+                          file.type === 'image' && file.previewUri ? (
+                            <button
+                              onClick={() => onZoomImage(file.previewUri!)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Preview
+                            </button>
+                          ) : null
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer note */}
+        <div className="px-5 py-3 border-t border-gray-50 shrink-0">
+          <p className="text-[10px] text-gray-400 text-center leading-relaxed">
+            Cloud URLs are valid for 10 minutes. Pending files will be uploaded when you save the patient.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+interface FileCardProps {
+  name: string;
+  type: string;
+  meta: string;
+  badge: React.ReactNode;
+  actions: React.ReactNode;
+}
+
+const FileCard: React.FC<FileCardProps> = ({ name, type, meta, badge, actions }) => (
+  <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-xl gap-3">
+    <div className="flex items-center gap-3 min-w-0">
+      <div className="p-2 bg-white rounded-lg border border-gray-100 shrink-0">
+        {isImage(type)
+          ? <ImageIcon className="w-4 h-4 text-blue-500" />
+          : <FileText className="w-4 h-4 text-gray-500" />
+        }
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs font-bold text-gray-800 truncate">{name}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          {badge}
+          {meta && <span className="text-[10px] text-gray-400">{meta}</span>}
+        </div>
+      </div>
+    </div>
+    {actions && <div className="shrink-0">{actions}</div>}
+  </div>
+);
+
+const CloudBadge = () => (
+  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+    <Cloud className="w-2.5 h-2.5" /> Cloud
+  </span>
+);
+
+const PendingBadge = () => (
+  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[10px] font-bold">
+    <Clock className="w-2.5 h-2.5" /> Pending
+  </span>
+);

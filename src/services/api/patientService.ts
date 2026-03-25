@@ -101,5 +101,44 @@ export const patientService = {
     });
     const parsed = parseResponse(response.data);
     return parsed.patients || [];
-  }
+  },
+
+  /**
+   * Step 1 of the S3 upload pipeline.
+   * Requests a presigned PUT URL from the Lambda.
+   * Mirrors the RN UploadService getPresignedUploadUrl action.
+   */
+  getPresignedUploadUrl: async (
+    patientId: string,
+    fileName: string,
+    fileType: string,
+    fileSize: number,
+    category: string
+  ): Promise<{ success: boolean; uploadUrl?: string; s3Key?: string; key?: string; error?: string }> => {
+    const response = await apiClient.post('/patient-data', {
+      action: 'getPresignedUploadUrl',
+      patientId, fileName, fileType, fileSize, category,
+    });
+    return parseResponse(response.data);
+  },
+
+  /**
+   * Step 3 of the S3 upload pipeline.
+   * Confirms a successful S3 PUT to the Lambda so it records metadata in DynamoDB.
+   * Mirrors the RN UploadService confirmFileUpload action.
+   */
+  confirmFileUpload: async (
+    patientId: string,
+    s3Key: string,
+    fileName: string,
+    fileType: string,
+    category: string,
+    fileSize: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    const response = await apiClient.post('/patient-data', {
+      action: 'confirmFileUpload',
+      patientId, s3Key, fileName, fileType, category, fileSize,
+    });
+    return parseResponse(response.data);
+  },
 };

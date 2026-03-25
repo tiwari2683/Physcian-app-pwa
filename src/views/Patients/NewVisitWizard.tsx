@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppSelector } from '../../controllers/hooks/hooks';
 import { patientService } from '../../services/api/patientService';
+import { uploadFilesWithPresignedUrls, fileNeedsUpload } from '../../services/uploadService';
+import type { LocalReportFile } from '../../services/uploadService';
 import { useLocalDraft } from '../../controllers/hooks/useLocalDraft';
 import { ArrowLeft, ArrowRight, Save, Loader2, AlertCircle, User, MapPin, Phone, MessageSquare } from 'lucide-react';
 
@@ -29,8 +31,20 @@ export const NewVisitWizard = () => {
   const { patientId } = useParams<{ patientId: string }>();
   const navigate = useNavigate();
 
+  // If patientId starts with 'draft_' this is a brand-new patient session.
+  // Otherwise it is an existing patient being consulted.
+  const isNewPatient = patientId?.startsWith('draft_') ?? false;
+  const realPatientId = isNewPatient ? undefined : patientId;
+
+  // draftId is the stable key passed into DraftService.
+  // For new patients  → the 'draft_<uuid>' from the URL (survives F5)
+  // For real patients → their patientId (strict one-draft-per-patient upsert)
+  const draftId = patientId ?? 'draft_unknown';
+
   const [activeStep, setActiveStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Captured from the assistant's active visit record on mount
@@ -41,11 +55,12 @@ export const NewVisitWizard = () => {
 
   // Try to load patient from Redux store first (already fetched in Patient Directory)
   const existingPatient = useAppSelector(state =>
-    state.patients.patients.find(p => p.patientId === patientId)
+    state.patients.patients.find(p => p.patientId === realPatientId)
   );
 
   const [formData, setFormData, clearDraft] = useLocalDraft(
-    `pwa_visit_draft_${patientId}`,
+    draftId,
+    realPatientId,
     INITIAL_FORM_STATE
   );
 
@@ -67,15 +82,15 @@ export const NewVisitWizard = () => {
 
   // ─────────────────────────────────────────────────────────────────────────
   // STEP 2 — Prefill triage data from IN_PROGRESS visit (assistant's data)
+  //   • Only when this is a REAL (non-draft) patient session
   //   • Captures the visitId so completeVisit can reference it transactionally
-  //   • Hydrates clinical vitals, chief complaint, and uploaded report files
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!patientId) return;
+    if (!realPatientId) return; // skip for new-patient (draft_) sessions
 
     const fetchAssistantPrefill = async () => {
       try {
-        const activeVisit = await patientService.getActiveVisit(patientId);
+        const activeVisit = await patientService.getActiveVisit(realPatientId);
         if (activeVisit) {
           // ── Capture visitId so completeVisit can end the correct record ──
           if (activeVisit.visitId) {
@@ -138,7 +153,7 @@ export const NewVisitWizard = () => {
     };
 
     fetchAssistantPrefill();
-  }, [patientId, setFormData]);
+  }, [realPatientId, setFormData]);
 
   const mergeFiles = (existing: any[], incoming: any[]): any[] => {
     const names = new Set(existing.map(f => f.fileName || f.name));
@@ -205,6 +220,51 @@ export const NewVisitWizard = () => {
     if (!patientId) return;
 
     setSaveError(null);
+
+    // ─── Phase 1: Upload new files to S3 via presigned URL pipeline ────────────
+    const localFiles: LocalReportFile[] = formData.reportFiles || [];
+    const filesToUpload = localFiles.filter(fileNeedsUpload);
+    let processedReportFiles: LocalReportFile[] = localFiles.filter(f => !fileNeedsUpload(f)); // already-uploaded files
+
+    if (filesToUpload.length > 0 && realPatientId) {
+      setIsUploading(true);
+      setUploadProgress(`Uploading 0 of ${filesToUpload.length} file(s)… Do not close this tab.`);
+
+      try {
+        const { uploaded, failed } = await uploadFilesWithPresignedUrls(
+          filesToUpload,
+          realPatientId,
+          (done, total) => setUploadProgress(`Uploading ${done} of ${total} file(s)… Do not close this tab.`)
+        );
+
+        // Merge newly uploaded records with already-uploaded files
+        processedReportFiles = [
+          ...processedReportFiles,
+          // Cast uploaded records back to LocalReportFile shape for acuteData
+          ...uploaded.map(u => ({
+            id: u.s3Key,
+            name: u.name,
+            size: `${(u.size / 1024 / 1024).toFixed(2)} MB`,
+            type: (u.type.startsWith('image/') ? 'image' : 'document') as 'image' | 'document',
+            previewUri: null,
+            s3Key: u.s3Key,
+            key: u.key,
+            uploadedToS3: true as const,
+            uploadDate: u.uploadDate,
+          })),
+        ];
+
+        if (failed.length > 0) {
+          // Non-blocking — surface a warning but continue with the save
+          setSaveError(`Warning: ${failed.length} file(s) failed to upload (${failed.join(', ')}). The visit will be saved without them.`);
+        }
+      } finally {
+        setIsUploading(false);
+        setUploadProgress('');
+      }
+    }
+
+    // ─── Phase 2: Build acuteData payload & complete visit ────────────────────
     setIsSaving(true);
     try {
       const combinedInvestigations = [
@@ -223,7 +283,7 @@ export const NewVisitWizard = () => {
         advisedInvestigations: finalInvestigationsString,
         newHistoryEntry: formData.newHistoryEntry,
         reports:    formData.reports,
-        reportFiles: formData.reportFiles || [],
+        reportFiles: processedReportFiles, // ← S3-processed files
         medications: formData.medications || [],
         clinicalParameters: {
           inr:         formData.inr,
@@ -268,6 +328,41 @@ export const NewVisitWizard = () => {
 
   return (
     <div className="flex flex-col h-full">
+
+      {/* ── Full-screen Upload Blocking Overlay ─────────────────────────────────
+          Visible only while S3 presigned PUT requests are in-flight.
+          Prevents the doctor from closing the tab or navigating away.       ── */}
+      {isUploading && (
+        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white/90 backdrop-blur-md">
+          <div className="flex flex-col items-center gap-4 max-w-sm text-center px-6">
+            {/* Animated spinner */}
+            <div className="relative w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
+              <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-base font-bold text-gray-900">{uploadProgress}</p>
+              <p className="text-xs text-red-600 font-semibold mt-2 flex items-center justify-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5" />
+                Do not close or refresh this tab
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Files are being securely uploaded to cloud storage. This will only take a moment.
+              </p>
+            </div>
+
+            {/* Progress bar (indeterminate style) */}
+            <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
+              <div className="h-full w-1/2 bg-blue-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Ultra-Compact Seamless Header ─── */}
       <div 
         className="sticky top-0 z-40 bg-white"

@@ -1,8 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Users, Activity, Clock, PlayCircle, Loader2 } from 'lucide-react';
+import { Calendar, Users, Activity, Clock, PlayCircle, Loader2, FileEdit, Trash2, RefreshCw } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../controllers/hooks/hooks';
 import { fetchWaitingRoom, updateVisitStatusThunk } from '../../controllers/slices/patientSlice';
+import { DraftService } from '../../services/draftService';
+import type { DraftPatient } from '../../services/draftService';
+
+// ─── Relative time helper ────────────────────────────────────────────────────
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 export const DashboardScreen = () => {
   const dispatch = useAppDispatch();
@@ -10,34 +23,44 @@ export const DashboardScreen = () => {
   
   const { waitingRoom, loadingWaitingRoom } = useAppSelector(state => state.patients);
   const [startingVisitId, setStartingVisitId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<DraftPatient[]>([]);
 
-  // Poll waiting room every 15 seconds
+  // ── On mount: run GC (cleanup legacy + expired drafts), then load draft queue ──
+  useEffect(() => {
+    DraftService.cleanupOldDrafts(30);
+    setDrafts(DraftService.getAllDrafts());
+  }, []);
+
+  // ── Poll waiting room every 15 seconds ──────────────────────────────────────
   useEffect(() => {
     dispatch(fetchWaitingRoom());
-    
     const intervalId = setInterval(() => {
       dispatch(fetchWaitingRoom());
-    }, 15000); // 15 seconds
-    
+    }, 15000);
     return () => clearInterval(intervalId);
   }, [dispatch]);
 
   const handleStartConsultation = async (patient: any) => {
     setStartingVisitId(patient.visitId);
     try {
-      // Transition from WAITING to IN_PROGRESS
       await dispatch(updateVisitStatusThunk({ 
         visitId: patient.visitId, 
         status: 'IN_PROGRESS' 
       })).unwrap();
-      
-      // Navigate to Visit Wizard for Consultation
       navigate(`/visit/new/${patient.patientId}`);
     } catch (err) {
       console.error('Failed to start consultation', err);
-      // Optional: Add a toast notification here
       setStartingVisitId(null);
     }
+  };
+
+  const handleResumeDraft = (draft: DraftPatient) => {
+    navigate(`/visit/new/${draft.draftId}`);
+  };
+
+  const handleDeleteDraft = (draftId: string) => {
+    DraftService.deleteDraft(draftId);
+    setDrafts(prev => prev.filter(d => d.draftId !== draftId));
   };
 
   return (
@@ -51,7 +74,7 @@ export const DashboardScreen = () => {
         )}
       </div>
       
-      {/* Metrics Grid */}
+      {/* ── Metrics Grid ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
           <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
@@ -62,7 +85,6 @@ export const DashboardScreen = () => {
             <p className="text-2xl font-bold text-gray-900">{waitingRoom.length}</p>
           </div>
         </div>
-
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
             <Users className="w-8 h-8" />
@@ -72,7 +94,6 @@ export const DashboardScreen = () => {
             <p className="text-2xl font-bold text-gray-900">1,248</p>
           </div>
         </div>
-
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
           <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
             <Activity className="w-8 h-8" />
@@ -84,8 +105,87 @@ export const DashboardScreen = () => {
         </div>
       </div>
 
-      {/* Live Waiting Room Queue */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 mt-8 overflow-hidden">
+      {/* ═══════════════════════════════════════════════════════════════════════
+          DRAFT QUEUE — rendered above the Waiting Room, hidden when empty
+          Visually distinct: amber/orange palette + smaller compact cards
+          so doctors cannot confuse a draft with an active waiting patient
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {drafts.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-amber-100 overflow-hidden">
+          <div className="p-4 border-b border-amber-50 flex items-center justify-between bg-amber-50/60">
+            <div>
+              <h2 className="text-base font-bold text-amber-900 flex items-center gap-2">
+                <FileEdit className="w-4 h-4 text-amber-600" />
+                Saved Drafts
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                  {drafts.length}
+                </span>
+              </h2>
+              <p className="text-xs text-amber-700 mt-0.5">Interrupted consultations — resume where you left off</p>
+            </div>
+          </div>
+
+          {/* Horizontally scrollable card row */}
+          <div className="p-4">
+            <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-amber-200 scrollbar-track-transparent">
+              {drafts.map(draft => {
+                const name = (draft.formData?.name as string) || 'Unnamed Patient';
+                const age  = draft.formData?.age  as string | undefined;
+                const sex  = draft.formData?.sex  as string | undefined;
+
+                return (
+                  <div
+                    key={draft.draftId}
+                    className="snap-start flex-shrink-0 w-52 bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col gap-2.5 hover:shadow-md hover:border-amber-400 transition-all"
+                  >
+                    {/* Draft badge */}
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 text-[10px] font-bold uppercase tracking-wide">
+                        <FileEdit className="w-2.5 h-2.5" /> Draft
+                      </span>
+                      <button
+                        onClick={() => handleDeleteDraft(draft.draftId)}
+                        title="Delete draft"
+                        className="p-1 rounded-lg text-amber-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Patient info */}
+                    <div>
+                      <p className="font-semibold text-gray-900 text-sm truncate">{name}</p>
+                      {(age || sex) && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {[age ? `${age}y` : null, sex].filter(Boolean).join(' • ')}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Last saved */}
+                    <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {timeAgo(draft.lastUpdatedAt)}
+                    </p>
+
+                    {/* Resume CTA */}
+                    <button
+                      onClick={() => handleResumeDraft(draft)}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors active:scale-95"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Resume
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Live Waiting Room Queue ── */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <div>
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -100,7 +200,6 @@ export const DashboardScreen = () => {
         </div>
         
         <div className="p-6">
-          {/* Newest-first: most recently arrived patients appear at the top */}
           {[...waitingRoom].sort((a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
           ).length === 0 ? (
