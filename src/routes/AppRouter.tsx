@@ -8,6 +8,9 @@ import { NewPatientRegistration } from '../views/Patients/NewPatientRegistration
 import { NewVisitWizard } from '../views/Patients/NewVisitWizard';
 import AppointmentsList from '../views/Appointments/AppointmentsList';
 
+import { FitnessCertificateForm } from '../views/FitnessCertificate/FitnessCertificateForm';
+import { FitnessCertificateHistory } from '../views/FitnessCertificate/FitnessCertificateHistory';
+
 /** Generates a UUID-stamped draft URL for new patients, placing the draft
  *  identity in the URL so it survives a page refresh (F5). */
 const NewPatientRedirect = () => {
@@ -28,11 +31,18 @@ export const AppRouter = () => {
             <Route path="/dashboard" element={<DashboardScreen />} />
             <Route path="/patients" element={<PatientDirectory />} />
             <Route path="/patients/new" element={<NewPatientRegistration />} />
+            
+            {/* Fitness Certificate Routes */}
+            <Route path="/fitness-certificate" element={<PatientDirectory />} />
+            <Route path="/fitness-certificate/:patientId" element={<FitnessCertificateForm />} />
+            <Route path="/fitness-certificate/:patientId/history" element={<FitnessCertificateHistory />} />
+
             {/* New patient → generate a stable draft UUID in the URL */}
             <Route path="/visit/new" element={<NewPatientRedirect />} />
             {/* Handles both draft_<uuid> and real patientIds */}
             <Route path="/visit/new/:patientId" element={<NewVisitWizard />} />
             <Route path="/appointments" element={<AppointmentsList />} />
+            
             {/* Fallback route for authenticated users */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>

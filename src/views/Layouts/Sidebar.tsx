@@ -20,7 +20,7 @@ export const Sidebar = ({
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Patients', path: '/patients', icon: Users },
     { name: 'Appointments', path: '/appointments', icon: CalendarDays },
-    { name: 'Prescriptions', path: '/prescriptions', icon: FileText },
+    { name: 'Fitness Certificate', path: '/fitness-certificate', icon: FileText },
   ];
 
   const sidebarClass = [

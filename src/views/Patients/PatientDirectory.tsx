@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, UserPlus, FileText } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../controllers/hooks/hooks';
 import { fetchPatients } from '../../controllers/slices/patientSlice';
 
 export const PatientDirectory = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useAppDispatch();
   const { patients, loading, error } = useAppSelector((state) => state.patients);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const isCertificateMode = location.pathname.startsWith('/fitness-certificate');
 
   useEffect(() => {
     dispatch(fetchPatients());
@@ -23,12 +26,25 @@ export const PatientDirectory = () => {
   return (
     <div className="p-4 lg:p-8 space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-2xl font-bold text-gray-900">Patient Directory</h1>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {isCertificateMode ? 'Select Patient' : 'Patient Directory'}
+        </h1>
         <button onClick={() => navigate('/patients/new')} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
           <UserPlus className="w-4 h-4" />
           <span className="font-medium">New Patient</span>
         </button>
       </div>
+
+      {/* Section 8 — Certificate Mode Banner */}
+      {isCertificateMode && (
+        <div className="bg-blue-600 text-white rounded-2xl p-4 flex items-center gap-3 shadow-lg shadow-blue-200">
+          <FileText className="w-6 h-6 shrink-0" />
+          <div>
+            <p className="font-bold">Select a patient to issue a Fitness Certificate</p>
+            <p className="text-blue-200 text-sm">Search by name or phone number below</p>
+          </div>
+        </div>
+      )}
 
       {/* Search Bar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-center gap-3">
@@ -78,12 +94,22 @@ export const PatientDirectory = () => {
                   <p className="flex justify-between"><span className="font-medium text-gray-900">Phone:</span> {patient.mobile}</p>
                   <p className="flex justify-between"><span className="font-medium text-gray-900">Last Visit:</span> {new Date(patient.updatedAt).toLocaleDateString()}</p>
                 </div>
+
+                {/* Section 8 — Full-blue button in certificate mode */}
                 <button 
-                  onClick={() => navigate(`/visit/new/${patient.patientId}`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 text-blue-600 rounded-lg transition-colors border border-gray-200"
+                  onClick={() => navigate(
+                    isCertificateMode
+                      ? `/fitness-certificate/${patient.patientId}`
+                      : `/visit/new/${patient.patientId}`
+                  )}
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
+                    isCertificateMode
+                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-100'
+                      : 'bg-white text-blue-600 border border-gray-200 hover:bg-gray-50 hover:border-blue-200'
+                  }`}
                 >
                   <FileText className="w-4 h-4" />
-                  <span className="text-sm font-medium">Start Consultation / Visit</span>
+                  {isCertificateMode ? 'Issue Fitness Certificate' : 'Start Consultation / Visit'}
                 </button>
               </div>
             ))
