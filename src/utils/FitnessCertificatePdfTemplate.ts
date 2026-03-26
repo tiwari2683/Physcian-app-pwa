@@ -186,12 +186,11 @@ export const certificatePdfStyles = `
   }
   
   .opinion-type {
-    font-weight: 800;
-    color: #0070D6;
-    font-size: 11pt;
-    margin-bottom: 8px;
+    font-weight: 700;
+    color: #4A5568;
+    font-size: 10pt;
+    margin-bottom: 6px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
   
   .opinion-content {
@@ -199,6 +198,7 @@ export const certificatePdfStyles = `
     color: #1A202C;
     line-height: 1.7;
     white-space: pre-wrap;
+    word-break: break-word;
     font-weight: 500;
   }
   
@@ -265,6 +265,7 @@ export const certificatePdfStyles = `
     color: #2D3748;
     line-height: 1.6;
     white-space: pre-wrap;
+    word-break: break-word;
   }
   
   /* Footer / Signature Section */
@@ -284,6 +285,13 @@ export const certificatePdfStyles = `
     vertical-align: bottom;
   }
   
+  .signature-img {
+    height: 40px;
+    width: auto;
+    display: block;
+    margin-bottom: 5px;
+  }
+
   .signature-line {
     width: 180px;
     height: 2px;
@@ -376,7 +384,7 @@ export const certificatePdfStyles = `
   }
 
   /* PAGE BREAK RULES */
-  .section, .opinion-container, .patient-info-box {
+  .section, .opinion-container, .patient-info-box, .vitals-table, .investigations-table {
     page-break-inside: avoid;
     break-inside: avoid;
   }
@@ -400,11 +408,13 @@ export const certificatePdfStyles = `
 export interface FitnessDoctorInfo {
     name: string;
     credentials: string;
+    signatureUrl?: string;
 }
 
 export const DEFAULT_FITNESS_DOCTOR_INFO: FitnessDoctorInfo = {
     name: "Dr. Dipak Gawli",
-    credentials: "MBBS, DNB General Medicine"
+    credentials: "MBBS, DNB General Medicine",
+    signatureUrl: "https://upload.wikimedia.org/wikipedia/commons/f/fb/John_Hancock_signature.png" // Fallback placeholder signature
 };
 
 // ===========================================
@@ -541,6 +551,7 @@ export function generateFitnessCertificateHtml(
     <!-- Footer -->
     <div class="footer">
       <div class="signature-cell">
+        ${doctorInfo.signatureUrl ? `<img src="${doctorInfo.signatureUrl}" class="signature-img" crossOrigin="anonymous" alt="Signature" />` : ''}
         <div class="signature-line"></div>
         <div class="signature-name">${doctorInfo.name}</div>
         <div class="signature-title">${doctorInfo.credentials}</div>
