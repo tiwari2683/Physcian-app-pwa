@@ -593,22 +593,22 @@ export const handler = async (event, context) => {
                 return await updateVisitStatus(requestData);
 
             case 'getClinicalHistory':
-                return await fetchClinicalHistory(requestData.patientId);
+                return formatSuccessResponse(await fetchClinicalHistory(requestData.patientId));
 
             case 'getMedicalHistory':
-                return await fetchMedicalHistory(requestData.patientId);
+                return formatSuccessResponse(await fetchMedicalHistory(requestData.patientId));
 
             case 'getReportsHistory':
-                return await fetchReportsHistory(requestData.patientId);
+                return formatSuccessResponse(await fetchReportsHistory(requestData.patientId));
 
             case 'getDiagnosisHistory':
-                return await fetchDiagnosisHistory(requestData.patientId);
+                return formatSuccessResponse(await fetchDiagnosisHistory(requestData.patientId));
 
             case 'getInvestigationsHistory':
-                return await fetchInvestigationsHistory(requestData.patientId);
+                return formatSuccessResponse(await fetchInvestigationsHistory(requestData.patientId));
 
             case 'getPrescriptionHistory':
-                return await fetchPrescriptionHistory(requestData.patientId);
+                return formatSuccessResponse(await fetchPrescriptionHistory(requestData.patientId));
 
             case 'getAllPatients':
                 return await getAllPatients();
@@ -988,10 +988,10 @@ async function fetchClinicalHistory(patientId) {
             }));
 
         console.log(`✅ Found ${clinicalHistory.length} clinical history entries in Visits`);
-        return formatSuccessResponse({ success: true, clinicalHistory });
+        return { success: true, clinicalHistory };
     } catch (error) {
         console.error(`❌ Clinical history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
+        return { success: false, clinicalHistory: [], error: error.message };
     }
 }
 
@@ -1011,10 +1011,10 @@ async function fetchMedicalHistory(patientId) {
             }));
 
         console.log(`✅ Found ${medicalHistory.length} medical history entries in Visits`);
-        return formatSuccessResponse({ success: true, medicalHistory });
+        return { success: true, medicalHistory };
     } catch (error) {
         console.error(`❌ Medical history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, medicalHistory: [], error: error.message });
+        return { success: false, medicalHistory: [], error: error.message };
     }
 }
 
@@ -1035,10 +1035,10 @@ async function fetchReportsHistory(patientId) {
             }));
 
         console.log(`✅ Found ${reportsHistory.length} reports history entries in Visits`);
-        return formatSuccessResponse({ success: true, reportsHistory });
+        return { success: true, reportsHistory };
     } catch (error) {
         console.error(`❌ Reports history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, reportsHistory: [], error: error.message });
+        return { success: false, reportsHistory: [], error: error.message };
     }
 }
 
@@ -1058,10 +1058,10 @@ async function fetchDiagnosisHistory(patientId) {
             }));
 
         console.log(`✅ Found ${diagnosisHistory.length} diagnosis history entries in Visits`);
-        return formatSuccessResponse({ success: true, diagnosisHistory });
+        return { success: true, diagnosisHistory };
     } catch (error) {
         console.error(`❌ Diagnosis history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, diagnosisHistory: [], error: error.message });
+        return { success: false, diagnosisHistory: [], error: error.message };
     }
 }
 
@@ -1082,10 +1082,10 @@ async function fetchInvestigationsHistory(patientId) {
             }));
 
         console.log(`✅ Found ${investigationsHistory.length} investigations history entries in Visits`);
-        return formatSuccessResponse({ success: true, investigationsHistory });
+        return { success: true, investigationsHistory };
     } catch (error) {
         console.error(`❌ Investigations history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, investigationsHistory: [], error: error.message });
+        return { success: false, investigationsHistory: [], error: error.message };
     }
 }
 
@@ -1105,10 +1105,10 @@ async function fetchPrescriptionHistory(patientId) {
             }));
 
         console.log(`✅ Found ${prescriptionHistory.length} prescription history entries in Visits`);
-        return formatSuccessResponse({ success: true, clinicalHistory: prescriptionHistory });
+        return { success: true, clinicalHistory: prescriptionHistory };
     } catch (error) {
         console.error(`❌ Prescription history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
+        return { success: false, clinicalHistory: [], error: error.message };
     }
 }
 
