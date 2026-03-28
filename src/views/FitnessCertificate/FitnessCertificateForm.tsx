@@ -20,6 +20,7 @@ import { patientService } from '../../services/api/patientService';
 import type { FitnessCertificateFormData, OpinionType } from '../../models/FitnessCertificateTypes';
 import { GenerateCertificatePdfModal } from './GenerateCertificatePdfModal';
 import { generatePrescriptionFromMedications } from '../../utils/FitnessCertificateUtils';
+import { generateChunkedFitnessCertificate } from '../../utils/FitnessCertificatePdfTemplate';
 import html2canvas from 'html2canvas';
 
 const SURGERY_FITNESS_OPTIONS = [
@@ -360,223 +361,31 @@ export const FitnessCertificateForm = () => {
                                 <FileText className="w-4 h-4" /> Live Certificate Preview
                             </h2>
 
-                            <div id="certificate-preview-dom" className="bg-white rounded-2xl shadow-xl shadow-blue-100/50 border border-t-[12px] border-blue-600 p-8 text-[11px] leading-relaxed overflow-hidden">
-
-                                {/* --- Letterhead --- */}
-                                <div className="text-center border-b-2 border-blue-600 pb-5 mb-5">
-                                    <h2 className="text-blue-600 font-bold text-lg uppercase tracking-widest mb-3">
-                                        MEDICAL FITNESS CERTIFICATE
-                                    </h2>
-                                    <p className="font-bold text-gray-900 text-base">Dr. Dipak Gawli</p>
-                                    <p className="text-gray-600 text-sm">MBBS, DNB General Medicine</p>
-                                </div>
-
-                                {/* --- Patient Information --- */}
-                                <div className="mb-4">
-                                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                        PATIENT INFORMATION
-                                    </h3>
-                                    <div className="space-y-1">
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-16 shrink-0">Name:</span>
-                                            <span className="text-gray-900 font-semibold">{formData.patientName || '—'}</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-16 shrink-0">Age/Sex:</span>
-                                            <span className="text-gray-900 font-semibold">
-                                                {formData.patientAge} years / {formData.patientSex}
-                                            </span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-16 shrink-0">Date:</span>
-                                            <span className="text-gray-900 font-semibold">
-                                                {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* --- Pre-Operative Evaluation (Conditional) --- */}
-                                {(formData.preOpEvaluationForm || formData.referredForPreOp) && (
-                                    <div className="mb-4">
-                                        <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                            PRE-OPERATIVE EVALUATION
-                                        </h3>
-                                        <div className="space-y-2">
-                                            {formData.preOpEvaluationForm && (
-                                                <p className="text-gray-700 leading-relaxed">
-                                                    PreOp evaluation / Fitness:{' '}
-                                                    <span className="font-bold text-blue-600 underline underline-offset-2">
-                                                        {formData.preOpEvaluationForm}
-                                                    </span>{' '}
-                                                    form
-                                                </p>
-                                            )}
-                                            {formData.referredForPreOp && (
-                                                <p className="text-gray-700 leading-relaxed">
-                                                    Thanks for your reference. Referred for PreOp evaluation posted for Dr.{' '}
-                                                    <span className="font-bold text-blue-600 underline underline-offset-2">
-                                                        {formData.referredForPreOp}
-                                                    </span>
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* --- Clinical Assessment --- */}
-                                <div className="mb-4">
-                                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                        CLINICAL ASSESSMENT
-                                    </h3>
-                                    <div className="space-y-1">
-                                        <div className="flex gap-2 min-w-0">
-                                            <span className="text-gray-500 font-bold w-28 shrink-0">Past History:</span>
-                                            <span className="text-gray-900 font-medium break-words min-w-0 flex-1">{formData.pastHistory || 'No significant history'}</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-28 shrink-0">Cardio Respiratory:</span>
-                                            <span className="text-gray-900 font-medium">{formData.cardioRespiratoryFunction || 'Normal'}</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-28 shrink-0">Sy/E:</span>
-                                            <span className="text-gray-900 font-medium">{formData.syE || 'Normal'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* --- Investigations --- */}
-                                <div className="mb-4">
-                                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                        INVESTIGATIONS
-                                    </h3>
-                                    <div className="space-y-1">
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-12 shrink-0">ECG:</span>
-                                            <span className="text-gray-900 font-medium">{formData.ecgField || 'Normal'}</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-12 shrink-0">Echo:</span>
-                                            <span className="text-gray-900 font-medium">{formData.echoField || 'Normal'}</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-12 shrink-0">CXR:</span>
-                                            <span className="text-gray-900 font-medium">{formData.cxrField || 'Normal'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* --- Medical Opinion --- */}
-                                <div className="mb-4">
-                                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                        MEDICAL OPINION
-                                    </h3>
-                                    <div className="space-y-2">
-                                        <div className="flex gap-2">
-                                            <span className="text-gray-500 font-bold w-16 shrink-0">Opinion:</span>
-                                            <span className={`font-medium ${formData.opinion ? 'text-gray-900' : 'text-gray-300 italic'}`}>
-                                                {formData.opinion || '_______________________'}
-                                            </span>
-                                        </div>
-                                        {formData.selectedOpinionType && (
-                                            <div className="mt-2 pl-3 border-l-4 border-blue-500 bg-blue-50/50 rounded-r-lg p-3">
-                                                <p className="text-[9px] font-black text-blue-600 uppercase tracking-wider mb-1">
-                                                    {formData.selectedOpinionType === 'surgery_fitness' && 'Fitness for Surgery'}
-                                                    {formData.selectedOpinionType === 'medication_modification' && 'Medication Modification'}
-                                                    {formData.selectedOpinionType === 'fitness_reserved' && 'Fitness Reserved For'}
-                                                </p>
-                                                <p className="text-gray-800 font-semibold leading-relaxed break-words">
-                                                    {formData.selectedOpinionType === 'surgery_fitness'
-                                                        ? (formData.surgeryFitnessOption || 'Not specified')
-                                                        : formData.selectedOpinionType === 'medication_modification'
-                                                            ? (formData.medicationModificationText || 'Not specified')
-                                                            : (formData.fitnessReservedText || 'Not specified')}
-                                                </p>
+                            <div 
+                                id="certificate-preview-dom" 
+                                className="bg-white rounded-2xl shadow-xl shadow-blue-100/50 border border-t-[12px] border-blue-600 p-8 text-[11px] leading-relaxed overflow-hidden"
+                                dangerouslySetInnerHTML={{
+                                    __html: (() => {
+                                        const { styles, headerHtml, footerHtml, sections } = generateChunkedFitnessCertificate(formData, {
+                                            name: "Dr. Dipak Gawli",
+                                            credentials: "MBBS, DNB General Medicine",
+                                            signatureUrl: "https://upload.wikimedia.org/wikipedia/commons/f/fb/John_Hancock_signature.png"
+                                        });
+                                        const scopedStyles = styles
+                                            .replace(/body \{/g, '#certificate-preview-dom {')
+                                            .replace(/\* \{/g, '#certificate-preview-dom * {');
+                                            
+                                        return `
+                                            <style>${scopedStyles}</style>
+                                            <div style="background: white; color: #1A202C; font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;">
+                                                ${headerHtml}
+                                                ${sections.map(s => s.html).join('')}
+                                                <div style="padding-top: 20px;">${footerHtml}</div>
                                             </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* --- Vitals & Labs (Conditional) --- */}
-                                {(formData.bloodPressure || formData.heartRate || formData.temperature ||
-                                    formData.oxygenSaturation || formData.respiratoryRate || formData.labValues) && (
-                                    <div className="mb-4">
-                                        <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                            VITALS &amp; LAB VALUES
-                                        </h3>
-                                        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-                                            <div className="space-y-1">
-                                                {formData.bloodPressure && (
-                                                    <div className="flex gap-2">
-                                                        <span className="text-gray-500 font-bold w-10 shrink-0">BP:</span>
-                                                        <span className="text-gray-900 font-medium">{formData.bloodPressure}</span>
-                                                    </div>
-                                                )}
-                                                {formData.heartRate && (
-                                                    <div className="flex gap-2">
-                                                        <span className="text-gray-500 font-bold w-10 shrink-0">HR:</span>
-                                                        <span className="text-gray-900 font-medium">{formData.heartRate}</span>
-                                                    </div>
-                                                )}
-                                                {formData.temperature && (
-                                                    <div className="flex gap-2">
-                                                        <span className="text-gray-500 font-bold w-10 shrink-0">Temp:</span>
-                                                        <span className="text-gray-900 font-medium">{formData.temperature}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="space-y-1">
-                                                {formData.oxygenSaturation && (
-                                                    <div className="flex gap-2">
-                                                        <span className="text-gray-500 font-bold w-12 shrink-0">SpO2:</span>
-                                                        <span className="text-gray-900 font-medium">{formData.oxygenSaturation}</span>
-                                                    </div>
-                                                )}
-                                                {formData.respiratoryRate && (
-                                                    <div className="flex gap-2">
-                                                        <span className="text-gray-500 font-bold w-12 shrink-0">RR:</span>
-                                                        <span className="text-gray-900 font-medium">{formData.respiratoryRate}</span>
-                                                    </div>
-                                                )}
-                                                {formData.labValues && (
-                                                    <div className="flex gap-2 min-w-0">
-                                                        <span className="text-gray-500 font-bold w-12 shrink-0">Labs:</span>
-                                                        <span className="text-gray-900 font-medium break-words min-w-0 flex-1">{formData.labValues}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* --- Recommendations (Conditional) --- */}
-                                {formData.recommendations && (
-                                    <div className="mb-4">
-                                        <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-100 pb-1 mb-3">
-                                            RECOMMENDATIONS
-                                        </h3>
-                                        <p className="text-gray-800 font-medium leading-relaxed break-words">{formData.recommendations}</p>
-                                    </div>
-                                )}
-
-                                {/* --- Footer / Signature --- */}
-                                <div className="flex justify-between items-end pt-4 border-t border-gray-200 mt-4">
-                                    <div>
-                                        <div className="w-32 h-[1px] bg-gray-500 mb-1" />
-                                        <p className="font-bold text-gray-900">Dr. Dipak Gawli</p>
-                                        <p className="text-gray-500 text-[9px] uppercase tracking-wider">Consulting Physician</p>
-                                        <p className="text-gray-400 text-[9px] mt-1">
-                                            Date: {new Date().toLocaleDateString('en-IN')}
-                                        </p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-gray-600 font-semibold">Valid for: {formData.validityPeriod || '30 days'}</p>
-                                        <p className="text-gray-400 text-[9px] mt-1">
-                                            Cert ID: {formData.certificateId || `CERT_${Date.now().toString().slice(-10)}`}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
+                                        `;
+                                    })()
+                                }}
+                            />
                             
                             {/* Action Buttons (Moved below Preview) */}
                             <div className="flex flex-col xl:flex-row gap-4 mt-6">
@@ -864,25 +673,18 @@ export const FitnessCertificateForm = () => {
 
                             <div className="grid grid-cols-3 gap-4">
                                 {[
-                                    { statusField: 'ecgField', findingsField: 'ecgFindings', label: 'ECG', placeholder: 'Normal ECG' },
-                                    { statusField: 'echoField', findingsField: 'echoFindings', label: 'Echo', placeholder: 'Normal Echo study' },
-                                    { statusField: 'cxrField', findingsField: 'cxrFindings', label: 'CXR', placeholder: 'Clear lung fields' },
+                                    { statusField: 'ecgField', label: 'ECG', placeholder: 'e.g. Normal ECG' },
+                                    { statusField: 'echoField', label: 'Echo', placeholder: 'e.g. Normal Echo study' },
+                                    { statusField: 'cxrField', label: 'CXR', placeholder: 'e.g. Clear lung fields' },
                                 ].map((inv) => (
-                                    <div key={inv.statusField} className="space-y-2">
+                                    <div key={inv.statusField} className="space-y-1">
                                         <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{inv.label}</label>
                                         <input
                                             type="text"
                                             value={(formData as any)[inv.statusField]}
                                             onChange={(e) => updateField(inv.statusField as any, e.target.value)}
-                                            className="w-full bg-gray-50 border border-gray-100 rounded-xl p-2 text-sm font-bold text-blue-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full bg-gray-50 border border-gray-100 rounded-xl p-3 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-gray-300"
                                             placeholder={inv.placeholder}
-                                        />
-                                        <textarea
-                                            value={(formData as any)[inv.findingsField]}
-                                            onChange={(e) => updateField(inv.findingsField as any, e.target.value)}
-                                            rows={1}
-                                            className="w-full bg-gray-50 border border-gray-100 rounded-xl p-2 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 resize-none placeholder:text-gray-300"
-                                            placeholder="Detailed findings..."
                                         />
                                     </div>
                                 ))}

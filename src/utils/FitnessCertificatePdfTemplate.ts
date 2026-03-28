@@ -1,21 +1,16 @@
 /**
  * Fitness Certificate PDF Template
- * Replicated from React Native implementation — 100% parity
- * Redesigned with professional clinic letterhead, borders, and watermark
+ * Redesigned with professional clinic letterhead, clean typography, and chunked sections
+ * for intelligent multi-page pagination.
  */
 
 import type { FitnessCertificateFormData } from "../models/FitnessCertificateTypes";
 
 // ===========================================
-// PDF STYLES (A4-optimized, print-safe)
+// PDF STYLES (Clean, Formal, Typography-focused)
 // ===========================================
 
 export const certificatePdfStyles = `
-  @page {
-    size: A4;
-    margin: 15mm;
-  }
-  
   * {
     box-sizing: border-box;
     margin: 0;
@@ -23,244 +18,185 @@ export const certificatePdfStyles = `
   }
   
   body {
-    font-family: 'Arial', 'Helvetica Neue', sans-serif;
-    color: #2D3748;
-    line-height: 1.6;
+    font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+    color: #1A202C;
+    line-height: 1.5;
     background: white;
     font-size: 11pt;
   }
   
-  .certificate-container {
-    max-width: 100%;
-    margin: 0 auto;
-    border: 2px solid #0070D6;
-    border-radius: 8px;
-    padding: 30px;
-    position: relative;
-    background: white;
-  }
-
-  .certificate-container::before {
-    content: '';
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    border: 1px solid #E8F4FD;
-    border-radius: 4px;
-    pointer-events: none;
-  }
-
-  .certificate-container::after {
-    content: 'MEDICAL CERTIFICATE';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-45deg);
-    font-size: 48pt;
-    font-weight: 900;
-    color: rgba(0, 112, 214, 0.04);
-    white-space: nowrap;
-    pointer-events: none;
-    letter-spacing: 8px;
-    z-index: 0;
+  /* Repeating Page Header */
+  .pdf-header {
+    margin-bottom: 15px;
+    border-bottom: 2px solid #2B6CB0;
+    padding-bottom: 12px;
   }
   
-  /* Header Section */
-  .certificate-header {
+  .header-top {
     text-align: center;
-    background: linear-gradient(135deg, #0070D6 0%, #15A1B1 100%);
-    margin: -30px -30px 24px -30px;
-    padding: 28px 30px 22px 30px;
-    border-radius: 6px 6px 0 0;
-    position: relative;
-    z-index: 1;
-  }
-  
-  .certificate-title {
-    font-size: 22pt;
-    font-weight: bold;
-    color: #FFFFFF;
     margin-bottom: 10px;
-    letter-spacing: 2px;
+  }
+
+  .certificate-title {
+    font-size: 18pt;
+    font-weight: 800;
+    color: #2B6CB0;
+    letter-spacing: 1px;
     text-transform: uppercase;
+    margin-bottom: 4px;
   }
   
   .doctor-name {
-    font-size: 16pt;
+    font-size: 12pt;
     font-weight: 700;
-    color: #FFFFFF;
-    margin-bottom: 4px;
+    color: #2D3748;
   }
   
   .doctor-credentials {
-    font-size: 11pt;
-    color: rgba(255, 255, 255, 0.85);
-    font-style: italic;
+    font-size: 9pt;
+    color: #718096;
   }
   
-  /* Section Styling */
+  .patient-details-grid {
+    display: table;
+    width: 100%;
+    margin-top: 8px;
+    background: #F7FAFC;
+    border-radius: 6px;
+    padding: 8px 12px;
+  }
+
+  .patient-row {
+    display: table-row;
+  }
+
+  .patient-col {
+    display: table-cell;
+    padding: 4px 8px;
+    width: 33%;
+  }
+
+  .patient-label {
+    font-size: 9pt;
+    text-transform: uppercase;
+    color: #718096;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+
+  .patient-val {
+    font-size: 11pt;
+    color: #1A202C;
+    font-weight: 600;
+  }
+  
+  /* Sections */
   .section {
-    margin-bottom: 18px;
-    position: relative;
-    z-index: 1;
+    padding: 0 5px 24px 5px; /* Replaced margin-bottom with padding-bottom to prevent html2canvas cropping */
   }
   
   .section-title {
-    font-size: 9pt;
-    font-weight: bold;
-    color: #0070D6;
-    background-color: #EBF8FF;
-    border-left: 4px solid #0070D6;
-    padding: 5px 10px;
-    margin-bottom: 10px;
+    font-size: 11pt;
+    font-weight: 700;
+    color: #2B6CB0;
+    border-bottom: 1px solid #E2E8F0;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
     text-transform: uppercase;
     letter-spacing: 1px;
-    border-radius: 0 4px 4px 0;
   }
   
-  /* Data Container (reusable gray background wrapper) */
-  .data-container {
-    background-color: #F8FAFC;
-    border: 1px solid #E2E8F0;
-    border-radius: 6px;
-    padding: 12px 16px;
-    margin-bottom: 4px;
-  }
-
-  /* Info Grid */
-  .info-grid {
+  /* Clean Data Rows (no heavy boxes) */
+  .data-grid {
     display: table;
     width: 100%;
+    table-layout: fixed;
   }
   
-  .info-row {
+  .data-row {
     display: table-row;
   }
   
-  .info-label {
+  .data-label {
     display: table-cell;
     font-weight: 700;
     color: #4A5568;
     width: 140px;
-    padding: 4px 0;
+    padding: 6px 0;
+    font-size: 10.5pt;
     vertical-align: top;
-    font-size: 10pt;
   }
   
-  .info-value {
+  .data-value {
     display: table-cell;
     color: #1A202C;
-    padding: 4px 0;
-    vertical-align: top;
-    font-size: 10pt;
-    font-weight: 500;
-  }
-  
-  /* Pre-Op Section */
-  .preop-text {
+    padding: 6px 0;
     font-size: 10.5pt;
-    color: #2D3748;
-    line-height: 1.8;
-    margin-bottom: 6px;
+    vertical-align: top;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
   }
   
-  .preop-highlight {
+  /* Tables (Investigations / Vitals) */
+  .clean-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 5px;
+    table-layout: fixed;
+  }
+
+  .clean-table th {
+    text-align: left;
+    padding: 8px 12px;
+    background: #F7FAFC;
+    color: #4A5568;
+    font-size: 9pt;
+    text-transform: uppercase;
+    border-bottom: 1px solid #CBD5E0;
     font-weight: 700;
-    color: #0070D6;
-    text-decoration: underline;
-    text-decoration-color: #0070D6;
-    text-underline-offset: 3px;
-    font-style: italic;
+  }
+
+  .clean-table td {
+    padding: 8px 12px;
+    font-size: 10.5pt;
+    border-bottom: 1px solid #EDF2F7;
+    color: #2D3748;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    vertical-align: top;
   }
   
-  /* Opinion Section */
-  .opinion-container {
-    background-color: #EBF8FF;
-    border: 1px solid #BEE3F8;
-    border-left: 5px solid #0070D6;
-    padding: 14px 16px;
-    border-radius: 0 8px 8px 0;
+  /* Medical Opinion (Prominent Centerpiece) */
+  .opinion-box {
+    background-color: #F0F9FF;
+    border-left: 4px solid #3182CE;
+    padding: 16px 20px;
     margin-top: 8px;
   }
   
   .opinion-type {
     font-weight: 700;
-    color: #4A5568;
+    color: #2C5282;
     font-size: 10pt;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
   
   .opinion-content {
-    font-size: 11pt;
+    font-size: 12pt;
     color: #1A202C;
-    line-height: 1.7;
+    line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
-    font-weight: 500;
-  }
-  
-  /* Vitals Table */
-  .vitals-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 4px;
-    background-color: white;
-  }
-
-  .vitals-table td {
-    padding: 6px 10px;
-    font-size: 10pt;
-    border: 1px solid #E2E8F0;
-  }
-
-  .vitals-label {
-    font-weight: 700;
-    color: #4A5568;
-    background-color: #F8FAFC;
-    width: 80px;
-  }
-
-  .vitals-value {
-    color: #1A202C;
     font-weight: 600;
-    width: 120px;
-  }
-
-  /* Investigations Table */
-  .investigations-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 4px;
-    background-color: white;
-    border: 1px solid #E2E8F0;
-  }
-
-  .investigations-table tr:nth-child(even) {
-    background-color: #F8FAFC;
-  }
-
-  .investigations-table td {
-    padding: 7px 12px;
-    font-size: 10pt;
-    border-bottom: 1px solid #EDF2F7;
-  }
-
-  .inv-label {
-    font-weight: 700;
-    color: #4A5568;
-    width: 60px;
-  }
-
-  .inv-value {
-    color: #1A202C;
-    font-weight: 500;
   }
   
-  /* Recommendations */
-  .recommendations-content {
+  /* Text Blocks */
+  .text-block {
     font-size: 11pt;
     color: #2D3748;
     line-height: 1.6;
@@ -268,141 +204,73 @@ export const certificatePdfStyles = `
     word-break: break-word;
   }
   
-  /* Footer / Signature Section */
-  .footer {
+  /* Footer Section */
+  .pdf-footer {
     margin-top: 40px;
     padding-top: 20px;
-    border-top: 2px solid #E2E8F0;
-    display: table;
-    width: 100%;
-    position: relative;
-    z-index: 1;
+    padding-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
   }
   
-  .signature-cell {
-    display: table-cell;
-    width: 50%;
-    vertical-align: bottom;
+  .signature-block {
+    text-align: left;
   }
   
   .signature-img {
-    height: 40px;
+    height: 50px;
     width: auto;
     display: block;
     margin-bottom: 5px;
   }
 
   .signature-line {
-    width: 180px;
-    height: 2px;
-    background: linear-gradient(to right, #0070D6, #15A1B1);
-    margin-bottom: 8px;
-    border-radius: 2px;
+    width: 200px;
+    height: 1px;
+    background: #4A5568;
+    margin-bottom: 6px;
+  }
+
+  .signature-title-text {
+    font-size: 9pt;
+    color: #718096;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
   }
   
   .signature-name {
-    font-weight: 800;
-    font-size: 13pt;
+    font-weight: 700;
+    font-size: 12pt;
     color: #1A202C;
-    margin-bottom: 2px;
   }
   
-  .signature-title {
+  .signature-creds {
     font-size: 9pt;
     color: #718096;
-    font-style: italic;
-  }
-
-  .signature-date {
-    font-size: 9pt;
-    color: #718096;
-    margin-top: 4px;
   }
   
-  .validity-cell {
-    display: table-cell;
-    width: 50%;
+  .validity-block {
     text-align: right;
-    vertical-align: bottom;
   }
   
-  .validity-box {
-    display: inline-block;
-    background-color: #EBF8FF;
-    border: 1px solid #BEE3F8;
-    border-radius: 8px;
-    padding: 10px 16px;
-    text-align: right;
-  }
-
   .validity-text {
     font-size: 11pt;
-    color: #0070D6;
+    color: #2B6CB0;
     font-weight: 700;
+    margin-bottom: 4px;
   }
 
-  .certificate-id {
-    font-size: 8pt;
-    color: #718096;
-    margin-top: 4px;
+  .cert-id {
+    font-size: 9pt;
+    color: #A0AEC0;
     font-family: monospace;
-  }
-  
-  /* Print Optimization */
-  @media print {
-    * {
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-    
-    body {
-      margin: 0;
-      padding: 0;
-    }
-    
-    .certificate-container {
-      border: 2px solid #0070D6 !important;
-      box-shadow: none !important;
-      page-break-inside: avoid;
-    }
-    
-    .certificate-header {
-      background: linear-gradient(135deg, #0070D6 0%, #15A1B1 100%) !important;
-      -webkit-print-color-adjust: exact !important;
-    }
-    
-    .section-title {
-      background-color: #EBF8FF !important;
-      border-left: 4px solid #0070D6 !important;
-    }
-    
-    .opinion-container {
-      background-color: #EBF8FF !important;
-      border-left: 5px solid #0070D6 !important;
-    }
-  }
-
-  /* PAGE BREAK RULES */
-  .section, .opinion-container, .patient-info-box, .vitals-table, .investigations-table {
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-
-  .footer {
-    page-break-inside: avoid;
-    break-inside: avoid;
-    page-break-before: auto;
-  }
-
-  .section + .section {
-    page-break-before: auto;
-    break-before: auto;
   }
 `;
 
 // ===========================================
-// DOCTOR INFO (Default)
+// DOCTOR INFO
 // ===========================================
 
 export interface FitnessDoctorInfo {
@@ -414,161 +282,223 @@ export interface FitnessDoctorInfo {
 export const DEFAULT_FITNESS_DOCTOR_INFO: FitnessDoctorInfo = {
     name: "Dr. Dipak Gawli",
     credentials: "MBBS, DNB General Medicine",
-    signatureUrl: "https://upload.wikimedia.org/wikipedia/commons/f/fb/John_Hancock_signature.png" // Fallback placeholder signature
+    signatureUrl: "https://upload.wikimedia.org/wikipedia/commons/f/fb/John_Hancock_signature.png"
 };
 
 // ===========================================
-// HTML GENERATION
+// DATA EXPORT FOR CHUNKED RENDERER
 // ===========================================
 
+export interface PdfSectionData {
+    id: string;
+    title: string;
+    html: string;
+}
+
+export interface ChunkedPdfData {
+    styles: string;
+    headerHtml: string;
+    footerHtml: string;
+    sections: PdfSectionData[];
+}
+
 /**
- * Generate HTML content for Fitness Certificate PDF
+ * Generates the clean, structurally separated HTML blocks for the PDF.
+ * This allows the generation logic to measure each section and apply smart page breaks.
  */
-export function generateFitnessCertificateHtml(
+export function generateChunkedFitnessCertificate(
     formData: Partial<FitnessCertificateFormData>,
     doctorInfo: FitnessDoctorInfo = DEFAULT_FITNESS_DOCTOR_INFO
-): string {
+): ChunkedPdfData {
+
     const currentDate = new Date().toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
+        day: "numeric", month: "long", year: "numeric"
     });
 
-    const { opinionTypeLabel, opinionContent } = getFitnessOpinionDetails(formData);
+    const certId = formData.certificateId || "FC" + Date.now().toString().slice(-6);
 
-    // Vitals section — only if at least one value present
-    const hasVitals = !!(formData.bloodPressure || formData.heartRate || formData.temperature
-        || formData.oxygenSaturation || formData.respiratoryRate || formData.labValues);
+    const headerHtml = [
+      '<div class="pdf-header">',
+        '<div class="header-top">',
+            '<div class="certificate-title">Medical Fitness Certificate</div>',
+            '<div class="doctor-name">', doctorInfo.name, '</div>',
+            '<div class="doctor-credentials">', doctorInfo.credentials, '</div>',
+        '</div>',
+        '<div class="patient-details-grid">',
+            '<div class="patient-row">',
+                '<div class="patient-col">',
+                    '<div class="patient-label">Patient Name</div>',
+                    '<div class="patient-val">', formData.patientName || "N/A", '</div>',
+                '</div>',
+                '<div class="patient-col">',
+                    '<div class="patient-label">Age / Sex</div>',
+                    '<div class="patient-val">', formData.patientAge || "N/A", ' Yrs / ', formData.patientSex || "N/A", '</div>',
+                '</div>',
+                '<div class="patient-col" style="text-align: right;">',
+                    '<div class="patient-label">Date</div>',
+                    '<div class="patient-val">', currentDate, '</div>',
+                '</div>',
+            '</div>',
+            '<div class="patient-row">',
+                '<div class="patient-col">',
+                    '<div class="patient-label">Certificate ID</div>',
+                    '<div class="patient-val">', certId, '</div>',
+                '</div>',
+            '</div>',
+        '</div>',
+      '</div>'
+    ].join("");
 
-    const vitalsSection = hasVitals ? `
-    <div class="section">
-      <div class="section-title">VITALS &amp; LAB VALUES</div>
-      <table class="vitals-table">
-        <tr>
-          ${formData.bloodPressure ? `<td class="vitals-label">BP</td><td class="vitals-value">${formData.bloodPressure}</td>` : '<td></td><td></td>'}
-          ${formData.oxygenSaturation ? `<td class="vitals-label">SpO2</td><td class="vitals-value">${formData.oxygenSaturation}</td>` : '<td></td><td></td>'}
-        </tr>
-        <tr>
-          ${formData.heartRate ? `<td class="vitals-label">HR</td><td class="vitals-value">${formData.heartRate}</td>` : '<td></td><td></td>'}
-          ${formData.respiratoryRate ? `<td class="vitals-label">RR</td><td class="vitals-value">${formData.respiratoryRate}</td>` : '<td></td><td></td>'}
-        </tr>
-        <tr>
-          ${formData.temperature ? `<td class="vitals-label">Temp</td><td class="vitals-value">${formData.temperature}</td>` : '<td></td><td></td>'}
-          ${formData.labValues ? `<td class="vitals-label">Labs</td><td class="vitals-value">${formData.labValues}</td>` : '<td></td><td></td>'}
-        </tr>
-      </table>
-    </div>
-  ` : '';
+    const sections: PdfSectionData[] = [];
 
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Medical Fitness Certificate</title>
-  <style>
-    ${certificatePdfStyles}
-  </style>
-</head>
-<body>
-  <div class="certificate-container" id="certificate-preview">
-    
-    <!-- Header -->
-    <div class="certificate-header">
-      <div class="certificate-title">MEDICAL FITNESS CERTIFICATE</div>
-      <div class="doctor-name">${doctorInfo.name}</div>
-      <div class="doctor-credentials">${doctorInfo.credentials}</div>
-    </div>
-    
-    <!-- Patient Information -->
-    <div class="section">
-      <div class="section-title">PATIENT INFORMATION</div>
-      <div class="data-container">
-        <div class="info-grid">
-          <div class="info-row">
-            <div class="info-label">Name:</div>
-            <div class="info-value">${formData.patientName || "N/A"}</div>
-          </div>
-          <div class="info-row">
-            <div class="info-label">Age / Sex:</div>
-            <div class="info-value">${formData.patientAge || "N/A"} years / ${formData.patientSex || "N/A"}</div>
-          </div>
-          <div class="info-row">
-            <div class="info-label">Date:</div>
-            <div class="info-value">${currentDate}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    ${generateFitnessPreOpSection(formData)}
-    
-    <!-- Clinical Assessment -->
-    <div class="section">
-      <div class="section-title">CLINICAL ASSESSMENT</div>
-      <div class="data-container">
-        <div class="info-grid">
-          <div class="info-row">
-            <div class="info-label">Past History:</div>
-            <div class="info-value">${formData.pastHistory || "No significant history"}</div>
-          </div>
-          <div class="info-row">
-            <div class="info-label">Cardio Respiratory:</div>
-            <div class="info-value">${formData.cardioRespiratoryFunction || "Normal"}</div>
-          </div>
-          <div class="info-row">
-            <div class="info-label">Sy/E:</div>
-            <div class="info-value">${formData.syE || "Normal"}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Investigations -->
-    <div class="section">
-      <div class="section-title">INVESTIGATIONS</div>
-      <table class="investigations-table">
-        <tr><td class="inv-label">ECG:</td><td class="inv-value">${formData.ecgField || "Normal"}</td></tr>
-        <tr><td class="inv-label">Echo:</td><td class="inv-value">${formData.echoField || "Normal"}</td></tr>
-        <tr><td class="inv-label">CXR:</td><td class="inv-value">${formData.cxrField || "Normal"}</td></tr>
-      </table>
-    </div>
-    
-    <!-- Medical Opinion -->
-    <div class="section">
-      <div class="section-title">MEDICAL OPINION</div>
-      <div class="opinion-container">
-        <div class="opinion-type">${opinionTypeLabel}</div>
-        <div class="opinion-content">${opinionContent}</div>
-      </div>
-    </div>
-    
-    ${vitalsSection}
-    
-    ${generateFitnessRecommendationsSection(formData)}
-    
-    <!-- Footer -->
-    <div class="footer">
-      <div class="signature-cell">
-        ${doctorInfo.signatureUrl ? `<img src="${doctorInfo.signatureUrl}" class="signature-img" crossOrigin="anonymous" alt="Signature" />` : ''}
-        <div class="signature-line"></div>
-        <div class="signature-name">${doctorInfo.name}</div>
-        <div class="signature-title">${doctorInfo.credentials}</div>
-        <div class="signature-date">Date: ${currentDate}</div>
-      </div>
-      <div class="validity-cell">
-        <div class="validity-box">
-          <div class="validity-text">Valid for: ${formData.validityPeriod || "30 days"}</div>
-          <div class="certificate-id">Cert ID: ${formData.certificateId || generateFitnessCertificateId()}</div>
-        </div>
-      </div>
-    </div>
-    
-  </div>
-</body>
-</html>
-  `.trim();
+    // 2. PRE-OP EVALUATION
+    if (formData.preOpEvaluationForm || formData.referredForPreOp) {
+        sections.push({
+            id: 'pre-op',
+            title: 'Pre-Operative Evaluation',
+            html: [
+                '<div class="section">',
+                    '<div class="section-title">Pre-Operative Evaluation</div>',
+                    '<div class="text-block">',
+                        formData.preOpEvaluationForm ? 'PreOp evaluation / Fitness: <strong>' + formData.preOpEvaluationForm + '</strong> form<br/>' : '',
+                        formData.referredForPreOp ? 'Thanks for your reference. Referred for PreOp evaluation posted for <strong>Dr. ' + formData.referredForPreOp + '</strong>' : '',
+                    '</div>',
+                '</div>'
+            ].join("")
+        });
+    }
+
+    // 3. CLINICAL ASSESSMENT
+    sections.push({
+        id: 'clinical',
+        title: 'Clinical Assessment',
+        html: [
+            '<div class="section">',
+                '<div class="section-title">Clinical Assessment</div>',
+                '<div class="data-grid">',
+                    '<div class="data-row">',
+                        '<div class="data-label">Past History:</div>',
+                        '<div class="data-value">', formData.pastHistory || "No significant history", '</div>',
+                    '</div>',
+                    '<div class="data-row">',
+                        '<div class="data-label">Cardio Respiratory:</div>',
+                        '<div class="data-value">', formData.cardioRespiratoryFunction || "Normal", '</div>',
+                    '</div>',
+                    '<div class="data-row">',
+                        '<div class="data-label">Sy/E (Symptoms/Exam):</div>',
+                        '<div class="data-value">', formData.syE || "Normal", '</div>',
+                    '</div>',
+                '</div>',
+            '</div>'
+        ].join("")
+    });
+
+    // 4. VITALS
+    const hasVitals = !!(formData.bloodPressure || formData.heartRate || formData.temperature || formData.oxygenSaturation || formData.respiratoryRate);
+    if (hasVitals || formData.labValues) {
+        sections.push({
+            id: 'vitals',
+            title: 'Vitals & Lab Parameters',
+            html: [
+                '<div class="section">',
+                    '<div class="section-title">Vitals & Lab Parameters</div>',
+                    '<table class="clean-table">',
+                        '<thead>',
+                            '<tr>',
+                                '<th>Parameter</th>',
+                                '<th>Recorded Value</th>',
+                            '</tr>',
+                        '</thead>',
+                        '<tbody>',
+                            formData.bloodPressure ? '<tr><td>Blood Pressure</td><td><strong>' + formData.bloodPressure + '</strong> mmHg</td></tr>' : '',
+                            formData.heartRate ? '<tr><td>Heart Rate</td><td><strong>' + formData.heartRate + '</strong> bpm</td></tr>' : '',
+                            formData.respiratoryRate ? '<tr><td>Respiratory Rate</td><td><strong>' + formData.respiratoryRate + '</strong> /min</td></tr>' : '',
+                            formData.temperature ? '<tr><td>Temperature</td><td><strong>' + formData.temperature + '</strong> °F</td></tr>' : '',
+                            formData.oxygenSaturation ? '<tr><td>SpO2</td><td><strong>' + formData.oxygenSaturation + '</strong> %</td></tr>' : '',
+                            formData.labValues ? '<tr><td>Other Labs</td><td><strong>' + formData.labValues + '</strong></td></tr>' : '',
+                        '</tbody>',
+                    '</table>',
+                '</div>'
+            ].join("")
+        });
+    }
+
+    // 5. INVESTIGATIONS
+    sections.push({
+        id: 'investigations',
+        title: 'Investigations',
+        html: [
+            '<div class="section">',
+                '<div class="section-title">Investigations</div>',
+                '<table class="clean-table">',
+                    '<thead>',
+                        '<tr>',
+                            '<th style="width: 30%;">Test</th>',
+                            '<th>Findings</th>',
+                        '</tr>',
+                    '</thead>',
+                    '<tbody>',
+                        '<tr><td><strong>ECG</strong></td><td>', formData.ecgField || "Normal", '</td></tr>',
+                        '<tr><td><strong>Echocardiogram</strong></td><td>', formData.echoField || "Normal", '</td></tr>',
+                        '<tr><td><strong>Chest X-Ray</strong></td><td>', formData.cxrField || "Normal", '</td></tr>',
+                    '</tbody>',
+                '</table>',
+            '</div>'
+        ].join("")
+    });
+
+    // 6. MEDICAL OPINION
+    const opinionDetails = getFitnessOpinionDetails(formData);
+    sections.push({
+        id: 'opinion',
+        title: 'Medical Opinion',
+        html: [
+            '<div class="section">',
+                '<div class="section-title">Medical Opinion</div>',
+                '<div class="opinion-box">',
+                    '<div class="opinion-type">', opinionDetails.opinionTypeLabel, '</div>',
+                    '<div class="opinion-content">', opinionDetails.opinionContent, '</div>',
+                '</div>',
+            '</div>'
+        ].join("")
+    });
+
+    // 7. RECOMMENDATIONS
+    if (formData.recommendations) {
+        sections.push({
+            id: 'recommendations',
+            title: 'Recommendations',
+            html: [
+                '<div class="section">',
+                    '<div class="section-title">Recommendations</div>',
+                    '<div class="text-block">', formData.recommendations, '</div>',
+                '</div>'
+            ].join("")
+        });
+    }
+
+    // 8. FOOTER
+    const footerHtml = [
+      '<div class="pdf-footer">',
+        '<div class="signature-block">',
+            '<div class="signature-title-text">Authorized Signature</div>',
+            doctorInfo.signatureUrl ? '<img src="' + doctorInfo.signatureUrl + '" class="signature-img" crossOrigin="anonymous" alt="Signature" />' : '<div style="height: 40px;"></div>',
+            '<div class="signature-line"></div>',
+            '<div class="signature-name">', doctorInfo.name, '</div>',
+            '<div class="signature-creds">', doctorInfo.credentials, '</div>',
+        '</div>',
+        '<div class="validity-block">',
+            '<div class="validity-text">Valid for: ', formData.validityPeriod || "30 days", '</div>',
+        '</div>',
+      '</div>'
+    ].join("");
+
+    return {
+        styles: certificatePdfStyles,
+        headerHtml,
+        footerHtml,
+        sections
+    };
 }
 
 // ===========================================
@@ -597,64 +527,8 @@ function getFitnessOpinionDetails(formData: Partial<FitnessCertificateFormData>)
             };
         default:
             return {
-                opinionTypeLabel: "Medical Opinion",
+                opinionTypeLabel: "Primary Opinion",
                 opinionContent: formData.opinion || "Not specified"
             };
     }
-}
-
-function generateFitnessPreOpSection(formData: Partial<FitnessCertificateFormData>): string {
-    if (!formData.preOpEvaluationForm && !formData.referredForPreOp) {
-        return "";
-    }
-
-    let preOpText = "";
-    if (formData.preOpEvaluationForm) {
-        preOpText = `
-      <div class="preop-text">
-        PreOp evaluation / Fitness: 
-        <span class="preop-highlight">${formData.preOpEvaluationForm}</span> form
-      </div>
-    `;
-    }
-
-    let referralText = "";
-    if (formData.referredForPreOp) {
-        referralText = `
-      <div class="preop-text">
-        Thanks for your reference. Referred for PreOp evaluation posted for 
-        <span class="preop-highlight">Dr. ${formData.referredForPreOp}</span>
-      </div>
-    `;
-    }
-
-    return `
-    <div class="section">
-      <div class="section-title">PRE-OPERATIVE EVALUATION</div>
-      ${preOpText}
-      ${referralText}
-    </div>
-  `;
-}
-
-function generateFitnessRecommendationsSection(formData: Partial<FitnessCertificateFormData>): string {
-    if (!formData.recommendations) {
-        return "";
-    }
-
-    return `
-    <div class="section">
-      <div class="section-title">RECOMMENDATIONS</div>
-      <div class="data-container">
-        <div class="recommendations-content">${formData.recommendations}</div>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * Generate a unique certificate ID
- */
-export function generateFitnessCertificateId(): string {
-    return `CERT_${Date.now()}`;
 }

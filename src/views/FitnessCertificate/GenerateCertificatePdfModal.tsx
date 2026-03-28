@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { X, FileText, Info, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, FileText, Info, Loader2, Share2, Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import type { FitnessCertificateFormData } from '../../models/FitnessCertificateTypes';
 import { 
-    generateFitnessCertificateHtml, 
+    generateChunkedFitnessCertificate, 
     DEFAULT_FITNESS_DOCTOR_INFO 
 } from '../../utils/FitnessCertificatePdfTemplate';
 
@@ -20,9 +20,21 @@ export const GenerateCertificatePdfModal = ({
     formData
 }: GenerateCertificatePdfModalProps) => {
     const [isGenerating, setIsGenerating] = useState(false);
-    const [fileName, setFileName] = useState(
-        `Fitness_Certificate_${formData.patientName?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toISOString().split('T')[0]}`
-    );
+    const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+    const [fileName, setFileName] = useState('');
+
+    useEffect(() => {
+        if (isOpen) {
+            const patientStr = formData.patientName?.trim()?.replace(/\s+/g, '_') || 'Patient';
+            const dateStr = new Date().toISOString().split('T')[0];
+            setFileName(`${patientStr}_fitness_certificate_${dateStr}`);
+        }
+    }, [isOpen, formData.patientName]);
+
+    const handleClose = () => {
+        setPdfBlob(null);
+        onClose();
+    };
 
     if (!isOpen) return null;
 
@@ -30,121 +42,176 @@ export const GenerateCertificatePdfModal = ({
         try {
             setIsGenerating(true);
 
-            // 1. Generate the full certificate HTML
-            const html = generateFitnessCertificateHtml(formData, DEFAULT_FITNESS_DOCTOR_INFO);
+            // 1. Generate chunked certificate sections
+            const { styles, headerHtml, footerHtml, sections } = generateChunkedFitnessCertificate(formData, DEFAULT_FITNESS_DOCTOR_INFO);
 
-            // 2. Mount a hidden off-screen container with FIXED WIDTH matching A4
-            //    Width 794px = A4 at 96dpi. Height is unconstrained so full content renders.
+            // 2. Mount a hidden container matching A4 proportions
             const container = document.createElement('div');
             container.style.cssText = `
                 position: fixed;
                 top: 0;
                 left: -9999px;
                 width: 794px;
-                min-height: 1123px;
                 background: white;
                 z-index: -1;
                 font-family: Arial, Helvetica, sans-serif;
-                overflow: visible;
             `;
-            container.innerHTML = html;
+
+            container.innerHTML = `<style>${styles}</style>`;
+            
+            const headerDiv = document.createElement('div');
+            headerDiv.innerHTML = headerHtml;
+            container.appendChild(headerDiv);
+
+            const sectionDivs = sections.map(sec => {
+                const div = document.createElement('div');
+                div.innerHTML = sec.html;
+                container.appendChild(div);
+                return { id: sec.id, title: sec.title, div };
+            });
+
+            const footerDiv = document.createElement('div');
+            footerDiv.innerHTML = footerHtml;
+            container.appendChild(footerDiv);
+
             document.body.appendChild(container);
 
-            // Wait for fonts to load AND give layout time to settle
+            // 3. Wait for layout settling and fonts
             await document.fonts.ready;
             await new Promise(resolve => setTimeout(resolve, 600));
 
-            // 4. Capture the FULL content height — not viewport height
-            const canvas = await html2canvas(container, {
-                scale: 2,                    // 2x for sharp text in PDF
-                useCORS: true,
-                logging: false,
-                width: 794,
-                height: container.scrollHeight,          // FULL height, not clipped
-                windowWidth: 794,
-                windowHeight: container.scrollHeight,
-                scrollX: 0,
-                scrollY: 0,
-                allowTaint: false,
-                backgroundColor: '#ffffff',
-            });
+            // Helper to capture a DOM node to canvas 
+            const captureEl = async (el: HTMLElement) => {
+                const cvs = await html2canvas(el, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    width: 794,
+                    height: el.scrollHeight + 20,
+                    windowWidth: 794,
+                    windowHeight: el.scrollHeight + 50,
+                    allowTaint: false,
+                    backgroundColor: '#ffffff'
+                });
+                return { canvas: cvs, imgData: cvs.toDataURL('image/png', 1.0), heightPx: cvs.height, widthPx: cvs.width };
+            };
 
-            // 5. Clean up the DOM immediately after capture
+            // 4. Capture each section individually
+            const headerCapture = await captureEl(headerDiv);
+            const footerCapture = await captureEl(footerDiv);
+            const sectionCaptures = [];
+            for (const s of sectionDivs) {
+                sectionCaptures.push({ id: s.id, title: s.title, capture: await captureEl(s.div) });
+            }
+
+            // Cleanup DOM
             document.body.removeChild(container);
 
-            // 6. Set up jsPDF in A4 portrait
-            const pdf = new jsPDF({
-                orientation: 'portrait',
-                unit: 'mm',
-                format: 'a4',
-            });
-
-            const pdfPageWidth = pdf.internal.pageSize.getWidth();   // 210mm
-            const pdfPageHeight = pdf.internal.pageSize.getHeight(); // 297mm
-
-            // 7. Calculate the rendered image dimensions in PDF units (mm)
-            //    canvas.width = 794 * 2 = 1588px (because scale: 2)
-            //    We want to fill the full PDF page width
-            const imgWidthMm = pdfPageWidth;
-
-            // 8. MULTI-PAGE LOGIC
-            //    If the total rendered height exceeds one page, slice the canvas
-            //    into page-sized strips and add each strip as a new PDF page.
+            // 5. Build PDF with smart pagination
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
             
-            const pageHeightPx = Math.floor(
-                (pdfPageHeight / pdfPageWidth) * canvas.width
-            ); // How many canvas pixels fit in one PDF page
+            const margins = 15; 
+            const contentWidth = pdfWidth - (margins * 2);
+            const maxContentHeight = pdfHeight - margins - 12; // Leave bottom 12mm for page numbers
 
-            let yOffsetPx = 0;  // Current vertical position in canvas pixels
-            let pageNumber = 0;
+            const pxToMm = (px: number, origW: number) => (px * contentWidth) / origW;
 
-            while (yOffsetPx < canvas.height) {
-                // Calculate how many pixels remain
-                const remainingPx = canvas.height - yOffsetPx;
-                const sliceHeightPx = Math.min(pageHeightPx, remainingPx);
+            const headerMm = pxToMm(headerCapture.heightPx, headerCapture.widthPx);
+            const footerMm = pxToMm(footerCapture.heightPx, footerCapture.widthPx);
 
-                // Create a temporary canvas for this page slice
-                const pageCanvas = document.createElement('canvas');
-                pageCanvas.width = canvas.width;
-                pageCanvas.height = sliceHeightPx;
+            let currentY = margins;
 
-                const pageCtx = pageCanvas.getContext('2d');
-                if (!pageCtx) break;
+            const drawHeader = () => {
+                pdf.addImage(headerCapture.imgData, 'PNG', margins, margins, contentWidth, headerMm, undefined, 'FAST');
+                currentY = margins + headerMm + 5; // spacing after header
+            };
 
-                // Draw the slice from the main canvas onto this page canvas
-                pageCtx.drawImage(
-                    canvas,
-                    0, yOffsetPx,          // Source: start at yOffsetPx
-                    canvas.width, sliceHeightPx,  // Source: take sliceHeightPx pixels
-                    0, 0,                  // Destination: top-left of page canvas
-                    canvas.width, sliceHeightPx   // Destination: fill page canvas
-                );
+            drawHeader(); // Page 1 Initialize
 
-                // Convert this slice to base64 image data
-                const pageImgData = pageCanvas.toDataURL('image/png', 1.0);
+            for (const sc of sectionCaptures) {
+                const sectionMm = pxToMm(sc.capture.heightPx, sc.capture.widthPx);
 
-                // Add a new page for every page after the first
-                if (pageNumber > 0) {
-                    pdf.addPage();
+                // Check if fits on current page
+                if (currentY + sectionMm > maxContentHeight) {
+                    const availableMmNewPage = maxContentHeight - (margins + headerMm + 5);
+
+                    if (sectionMm > availableMmNewPage) {
+                        // EDGE CASE 2: Section is larger than a full page -> MUST slice
+                        if (maxContentHeight - currentY < 25) {
+                            // Don't start a slice if tiny space remains (orphaned headers)
+                            pdf.addPage(); drawHeader();
+                        }
+
+                        let srcYPx = 0;
+                        let remainingMm = sectionMm;
+
+                        while (remainingMm > 0.5) {
+                            let availableMm = maxContentHeight - currentY;
+                            if (availableMm < 15) {
+                                pdf.addPage(); drawHeader();
+                                pdf.setFont('helvetica', 'italic');
+                                pdf.setFontSize(10);
+                                pdf.setTextColor(120);
+                                pdf.text(`${sc.title} (continued)`, margins, currentY + 3);
+                                currentY += 8;
+                                availableMm = maxContentHeight - currentY;
+                            }
+
+                            const sliceMm = Math.min(availableMm, remainingMm);
+                            const slicePx = Math.floor((sliceMm * sc.capture.heightPx) / sectionMm);
+
+                            const sCanvas = document.createElement('canvas');
+                            sCanvas.width = sc.capture.widthPx;
+                            sCanvas.height = slicePx;
+                            const ctx = sCanvas.getContext('2d');
+                            ctx?.drawImage(sc.capture.canvas, 0, srcYPx, sc.capture.widthPx, slicePx, 0, 0, sc.capture.widthPx, slicePx);
+
+                            pdf.addImage(sCanvas.toDataURL('image/png', 1.0), 'PNG', margins, currentY, contentWidth, sliceMm, undefined, 'FAST');
+                            
+                            currentY += sliceMm;
+                            srcYPx += slicePx;
+                            remainingMm -= sliceMm;
+
+                            if (remainingMm > 0.5) {
+                                pdf.addPage(); drawHeader();
+                                pdf.setFont('helvetica', 'italic');
+                                pdf.setFontSize(10);
+                                pdf.setTextColor(120);
+                                pdf.text(`${sc.title} (continued)`, margins, currentY + 3);
+                                currentY += 8;
+                            }
+                        }
+
+                    } else {
+                        // EDGE CASE 1: Move whole section to next page
+                        pdf.addPage(); drawHeader();
+                        pdf.addImage(sc.capture.imgData, 'PNG', margins, currentY, contentWidth, sectionMm, undefined, 'FAST');
+                        currentY += sectionMm;
+                    }
+                } else {
+                    // Fits natively
+                    pdf.addImage(sc.capture.imgData, 'PNG', margins, currentY, contentWidth, sectionMm, undefined, 'FAST');
+                    currentY += sectionMm;
                 }
+            }
 
-                // Calculate actual height of this slice in mm
-                const sliceHeightMm = (sliceHeightPx * pdfPageWidth) / canvas.width;
+            // 6. Draw Footer
+            if (currentY + footerMm > maxContentHeight) {
+                pdf.addPage(); drawHeader();
+            }
+            const footerY = Math.max(currentY + 5, maxContentHeight - footerMm);
+            pdf.addImage(footerCapture.imgData, 'PNG', margins, footerY, contentWidth, footerMm, undefined, 'FAST');
 
-                // Place the image on this PDF page
-                pdf.addImage(
-                    pageImgData,
-                    'PNG',
-                    0,              // x: left edge
-                    0,              // y: top edge
-                    imgWidthMm,     // width: full page width
-                    sliceHeightMm,  // height: proportional to slice
-                    undefined,
-                    'FAST'          // Compression: FAST for speed, SLOW for smaller file
-                );
-
-                yOffsetPx += sliceHeightPx;
-                pageNumber++;
+            // 7. Page Numbering
+            const totalPages = (pdf as any).internal.getNumberOfPages();
+            for (let i = 1; i <= totalPages; i++) {
+                pdf.setPage(i);
+                pdf.setFont('helvetica', 'normal');
+                pdf.setFontSize(9);
+                pdf.setTextColor(150);
+                pdf.text(`Page ${i} of ${totalPages}`, pdfWidth / 2, pdfHeight - 8, { align: 'center' });
             }
 
             // 9. Build the final filename
@@ -154,59 +221,61 @@ export const GenerateCertificatePdfModal = ({
                 .replace(/^_|_$/g, '');
             const finalFileName = `${sanitizedName || 'Fitness_Certificate'}.pdf`;
 
-            // 10. Try native share first (mobile browsers, PWA installed mode)
             const blob = pdf.output('blob');
-
-            if (
-                typeof navigator.share === 'function' &&
-                typeof navigator.canShare === 'function'
-            ) {
-                const file = new File([blob], finalFileName, { type: 'application/pdf' });
-                const sharePayload = {
-                    title: 'Fitness Certificate',
-                    text: `Medical Fitness Certificate for ${formData.patientName || 'Patient'}`,
-                    files: [file],
-                };
-
-                if (navigator.canShare(sharePayload)) {
-                    try {
-                        await navigator.share(sharePayload);
-                        setIsGenerating(false);
-                        onClose();
-                        return;
-                    } catch (shareErr: any) {
-                        // User cancelled share — fall through to download
-                        if (shareErr?.name !== 'AbortError') {
-                            console.warn('Share failed, falling back to download:', shareErr);
-                        }
-                    }
-                }
-            }
-
-            // 11. Fallback: trigger browser download
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = finalFileName;
-            link.style.display = 'none';
-            document.body.appendChild(link);
-            link.click();
-
-            // Clean up after a short delay
-            setTimeout(() => {
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-            }, 200);
-
-            setIsGenerating(false);
-            onClose();
+            setPdfBlob(blob);
+            setFileName(finalFileName);
 
         } catch (error: any) {
             console.error('PDF generation error:', error);
             alert(
                 `Failed to generate certificate PDF.\n\nError: ${error?.message || 'Unknown error'}\n\nPlease try again.`
             );
+        } finally {
             setIsGenerating(false);
+        }
+    };
+
+    const handleDownload = () => {
+        if (!pdfBlob) return;
+        const url = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }, 200);
+    };
+
+    const handleShare = async () => {
+        if (!pdfBlob) return;
+        
+        if (typeof navigator.share === 'function') {
+            const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+            const sharePayload = {
+                title: 'Fitness Certificate',
+                text: `Medical Fitness Certificate for ${formData.patientName || 'Patient'}`,
+                files: [file],
+            };
+
+            if (navigator.canShare && navigator.canShare(sharePayload)) {
+                try {
+                    await navigator.share(sharePayload);
+                    return;
+                } catch (shareErr: any) {
+                    if (shareErr?.name !== 'AbortError') {
+                        console.warn('Share failed:', shareErr);
+                        alert('Your device blocked sharing. Please use Download instead.');
+                    }
+                }
+            } else {
+                alert('Your browser does not support sharing PDF files directly. Please use the Download option, then share the file.');
+            }
+        } else {
+            alert('Sharing is not supported on this device/browser. Please download instead.');
         }
     };
 
@@ -224,8 +293,10 @@ export const GenerateCertificatePdfModal = ({
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0">
-                    <h2 className="text-xl font-bold text-gray-900">Generate Certificate PDF</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <h2 className="text-xl font-bold text-gray-900">
+                        {pdfBlob ? 'Certificate Ready' : 'Generate Certificate PDF'}
+                    </h2>
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                         <X className="w-6 h-6 text-gray-500" />
                     </button>
                 </div>
@@ -280,24 +351,43 @@ export const GenerateCertificatePdfModal = ({
                 </div>
 
                 {/* Footer Actions */}
-                <div className="p-6 bg-gray-50 border-t border-gray-100">
-                    <button
-                        onClick={generatePdf}
-                        disabled={isGenerating}
-                        className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
-                    >
-                        {isGenerating ? (
-                            <>
-                                <Loader2 className="w-6 h-6 animate-spin" />
-                                <span>Generating...</span>
-                            </>
-                        ) : (
-                            <>
-                                <FileText className="w-6 h-6" />
-                                <span>Generate & Share PDF</span>
-                            </>
-                        )}
-                    </button>
+                <div className="p-6 bg-gray-50 border-t border-gray-100 flex gap-4">
+                    {!pdfBlob ? (
+                        <button
+                            onClick={generatePdf}
+                            disabled={isGenerating}
+                            className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
+                        >
+                            {isGenerating ? (
+                                <>
+                                    <Loader2 className="w-6 h-6 animate-spin" />
+                                    <span>Generating...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <FileText className="w-6 h-6" />
+                                    <span>Generate PDF</span>
+                                </>
+                            )}
+                        </button>
+                    ) : (
+                        <>
+                            <button
+                                onClick={handleShare}
+                                className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold text-base shadow-lg shadow-green-200 transition-all active:scale-[0.98]"
+                            >
+                                <Share2 className="w-5 h-5" />
+                                <span>Share (Mobile/Web)</span>
+                            </button>
+                            <button
+                                onClick={handleDownload}
+                                className="flex-1 flex items-center justify-center gap-2 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 py-4 rounded-xl font-bold text-base transition-all active:scale-[0.98]"
+                            >
+                                <Download className="w-5 h-5" />
+                                <span>Download</span>
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
