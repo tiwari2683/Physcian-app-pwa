@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Pill, Trash2, Search, Plus, Clock, ChevronDown, Printer } from 'lucide-react';
+import { Pill, Trash2, Search, Plus, Clock, ChevronDown, FileText, Download, Share2, RefreshCw } from 'lucide-react';
 import { apiClient } from '../../services/api/apiClient';
+import { patientService } from '../../services/api/patientService';
+import { generatePrescriptionHTML } from '../../utils/PrescriptionPdfTemplate';
+import { generateAndSharePrescription } from '../../utils/PdfGenerator';
+import toast from 'react-hot-toast';
 
 export interface Medication {
   id?: string;
   name: string;
   dosage?: string;
+  unit?: string;
   timing?: string;
   timingValues?: string;
   duration?: string;
@@ -19,7 +24,6 @@ interface SmartPrescriptionEngineProps {
   prescriptions: Medication[];
   setPrescriptions: (meds: Medication[]) => void;
   patientId?: string; // For past visits
-  onGeneratePast?: (meds: Medication[]) => Promise<void>;
 }
 
 // Exact replication of RN Regex Expiration Engine
@@ -209,16 +213,18 @@ const MedicationCard = ({ med, index, updateMedication, removeMedication, isRead
   );
 };
 
-export const SmartPrescriptionEngine: React.FC<SmartPrescriptionEngineProps> = ({ prescriptions, setPrescriptions, patientId, onGeneratePast }) => {
+export const SmartPrescriptionEngine: React.FC<SmartPrescriptionEngineProps> = ({ prescriptions, setPrescriptions, patientId }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isAddingMedicine, setIsAddingMedicine] = useState(false);
   
-  // Add state for past prescriptions
-  const [pastPrescriptions, setPastPrescriptions] = useState<Medication[]>([]);
   // Track expanded state for past groups
   const [expandedPastGroups, setExpandedPastGroups] = useState<Record<string, boolean>>({});
+
+  // NEW: State for historical Prescription Documents (Full PDF records)
+  const [prescriptionRecords, setPrescriptionRecords] = useState<any[]>([]);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   // Strict Cache & UI Flush Guards mimicking RN
   const localCache = useRef(new Map<string, any[]>());
@@ -226,40 +232,21 @@ export const SmartPrescriptionEngine: React.FC<SmartPrescriptionEngineProps> = (
 
   useEffect(() => {
     if (!patientId) return;
-    const fetchPast = async () => {
-      try {
-        const response = await apiClient.post('/patient-data', { action: 'getPrescriptionHistory', patientId });
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        const parsedData = data?.body ? (typeof data.body === 'string' ? JSON.parse(data.body) : data.body) : data;
-        
-        let allPastMeds: Medication[] = [];
-        if (parsedData?.clinicalHistory?.length) {
-            parsedData.clinicalHistory.forEach((visit: any) => {
-                if (visit.medications && visit.medications.length > 0) {
-                    const medsWithDate = visit.medications.map((m: any) => ({
-                        ...m,
-                        datePrescribed: m.datePrescribed || visit.visitDate || visit.date || new Date().toISOString()
-                    }));
-                    allPastMeds = [...allPastMeds, ...medsWithDate];
-                }
+    const fetchRecords = async () => {
+        try {
+            const records = await patientService.getPatientPrescriptions(patientId);
+            const sorted = records.sort((a, b) => {
+                const dateA = a.prescriptionDate || a.visitDate || a.createdAt;
+                const dateB = b.prescriptionDate || b.visitDate || b.createdAt;
+                return new Date(dateB).getTime() - new Date(dateA).getTime();
             });
-        } else if (parsedData && Array.isArray(parsedData)) {
-            parsedData.forEach((visit: any) => {
-                if (visit.medications && visit.medications.length > 0) {
-                    const medsWithDate = visit.medications.map((m: any) => ({
-                        ...m,
-                        datePrescribed: m.datePrescribed || visit.visitDate || visit.createdAt || new Date().toISOString()
-                    }));
-                    allPastMeds = [...allPastMeds, ...medsWithDate];
-                }
-            });
+            setPrescriptionRecords(sorted);
+        } catch (e) {
+            console.error("Failed to fetch prescription records", e);
         }
-        setPastPrescriptions(allPastMeds);
-      } catch(e) {
-        console.error("Failed to fetch past prescriptions on mount", e);
-      }
     };
-    fetchPast();
+
+    fetchRecords();
   }, [patientId]);
 
   useEffect(() => {
@@ -392,16 +379,46 @@ export const SmartPrescriptionEngine: React.FC<SmartPrescriptionEngineProps> = (
     return Object.entries(groups).sort((a,b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
   }, [prescriptions]);
 
-  // Grouping by Date for Past
-  const groupedPastMeds = useMemo(() => {
-    const groups: Record<string, Medication[]> = {};
-    pastPrescriptions.forEach(med => {
-      const dateStr = med.datePrescribed ? new Date(med.datePrescribed).toDateString() : 'Unknown Date';
-      if (!groups[dateStr]) groups[dateStr] = [];
-      groups[dateStr].push(med);
-    });
-    return Object.entries(groups).sort((a,b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
-  }, [pastPrescriptions]);
+
+  const handleGeneratePdf = async (record: any, mode: 'share' | 'download') => {
+      if (generatingId) return;
+      setGeneratingId(record.prescriptionId || 'active');
+      
+      try {
+          const html = generatePrescriptionHTML({
+              patientName: record.patientName || 'Unknown Patient',
+              age: record.age || 'N/A',
+              gender: record.gender || 'N/A',
+              patientId: record.patientId || patientId,
+              address: record.address,
+              vitals: {
+                  bp: record.bp,
+                  weight: record.weight,
+                  height: record.height,
+                  temp: record.temperature
+              },
+              diagnosis: record.diagnosis || undefined,
+              advisedInvestigations: record.advisedInvestigations || undefined,
+              additionalNotes: record.additionalNotes || undefined,
+              medications: record.medications || [],
+              prescriptionDate: record.prescriptionDate || record.visitDate || undefined
+          });
+
+          if (mode === 'download') {
+              const originalShare = navigator.share;
+              Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+              await generateAndSharePrescription(html);
+              Object.defineProperty(navigator, 'share', { value: originalShare, configurable: true });
+          } else {
+              await generateAndSharePrescription(html);
+          }
+      } catch (err) {
+          console.error('PDF Generation Error:', err);
+          toast.error('Failed to generate PDF');
+      } finally {
+          setGeneratingId(null);
+      }
+  };
 
   return (
     <div className="space-y-6">
@@ -510,65 +527,124 @@ export const SmartPrescriptionEngine: React.FC<SmartPrescriptionEngineProps> = (
         )}
       </div>
 
-      {/* Past Prescriptions List (Read-only) */}
-      {groupedPastMeds.length > 0 && (
+      {/* Historical Interactive Prescription Records */}
+      {prescriptionRecords.length > 0 && (
           <div className="space-y-4 pt-6 mt-8 border-t-2 border-dashed border-gray-200">
              <div className="flex items-center gap-3 mb-2">
-               <Clock className="w-5 h-5 text-gray-400" />
-               <h3 className="text-sm font-black text-gray-500 uppercase tracking-widest">Previous Prescriptions</h3>
+               <FileText className="w-5 h-5 text-indigo-500" />
+               <h3 className="text-sm font-black text-indigo-600 uppercase tracking-widest">Past Prescription History</h3>
              </div>
              
-             {groupedPastMeds.map(([dateStr, meds]) => {
-                const isExpanded = !!expandedPastGroups[dateStr];
-                
-                return (
-                 <div key={dateStr} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm transition-all duration-300">
-                    <div 
-                      className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                      onClick={() => setExpandedPastGroups(prev => ({ ...prev, [dateStr]: !isExpanded }))}
-                    >
-                      <div>
-                         <h4 className="font-bold text-gray-900 text-[15px]">Prescription: {new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</h4>
-                         <span className="text-xs font-semibold text-gray-500">{meds.length} medication{meds.length !== 1 ? 's' : ''}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                         {onGeneratePast && (
-                           <button 
-                             onClick={(e) => { 
-                                e.stopPropagation(); 
-                                onGeneratePast(meds); 
-                             }}
-                             className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all shadow-sm active:scale-95"
-                           >
-                             <Printer className="w-4 h-4" /> Generate
-                           </button>
-                         )}
-                         <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
-                      </div>
-                    </div>
+             <div className="space-y-3">
+                 {prescriptionRecords.map((record, index) => {
+                     const timeObj = new Date(record.prescriptionDate || record.visitDate || record.createdAt);
+                     const dateStr = timeObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                     const timeStr = timeObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                     const isExpanded = !!expandedPastGroups[record.prescriptionId || dateStr];
+                     const isGenerating = generatingId === (record.prescriptionId || 'active');
+                     
+                     return (
+                         <div key={record.prescriptionId || index} className="bg-white rounded-xl shadow-sm border border-indigo-100 overflow-hidden transition-all duration-300">
+                             
+                             {/* Accordion Header (Clickable) */}
+                             <div 
+                                className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 cursor-pointer hover:bg-indigo-50/30 transition-colors"
+                                onClick={() => setExpandedPastGroups(prev => ({ ...prev, [record.prescriptionId || dateStr]: !isExpanded }))}
+                             >
+                                 <div className="flex-1 min-w-0">
+                                     <div className="flex items-center gap-2 mb-1">
+                                         <span className="text-sm font-bold text-gray-900">{dateStr}</span>
+                                         <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{timeStr}</span>
+                                     </div>
+                                     <p className="text-xs text-gray-600 truncate font-medium mt-1.5">
+                                         <span className="font-bold text-indigo-600">Rx:</span> {record.medications?.[0]?.name || 'No Meds'} {record.medications?.length > 1 ? `+${record.medications.length - 1} more` : ''}
+                                     </p>
+                                     {record.diagnosis && (
+                                         <p className="text-xs text-gray-500 truncate mt-0.5">
+                                             <span className="font-bold">Dx:</span> {record.diagnosis}
+                                         </p>
+                                     )}
+                                 </div>
+                                 
+                                 <div className="flex items-center justify-end gap-3 shrink-0 mt-2 md:mt-0 relative z-10">
+                                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                         <button 
+                                             disabled={!!generatingId}
+                                             onClick={(e) => { e.stopPropagation(); handleGeneratePdf(record, 'download'); }}
+                                             className="p-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-50 rounded-lg transition-all shadow-sm"
+                                             title="Download PDF Document"
+                                         >
+                                             {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                         </button>
+                                         <button 
+                                             disabled={!!generatingId}
+                                             onClick={(e) => { e.stopPropagation(); handleGeneratePdf(record, 'share'); }}
+                                             className="p-2 bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 disabled:opacity-50 rounded-lg transition-all shadow-sm"
+                                             title="Share PDF Document"
+                                         >
+                                             {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
+                                         </button>
+                                     </div>
+                                     <div className="w-px h-8 bg-gray-200 ml-1"></div>
+                                     <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-300 ml-1 ${isExpanded ? 'rotate-180' : ''}`} />
+                                 </div>
+                             </div>
 
-                    <div 
-                      className="grid transition-all duration-300 ease-in-out bg-gray-50/50"
-                      style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr', opacity: isExpanded ? 1 : 0 }}
-                    >
-                      <div className="overflow-hidden">
-                        <div className="p-3 border-t border-gray-100 space-y-2">
-                          {meds.map((med, idx) => (
-                             <MedicationCard 
-                               key={med.id || Math.random()} 
-                               med={med} 
-                               index={idx} 
-                               updateMedication={() => {}} 
-                               removeMedication={() => {}} 
-                               isReadOnly={true}
-                             />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                 </div>
-                );
-             })}
+                             {/* Accordion Expanded Body */}
+                             <div 
+                                className="grid transition-all duration-300 ease-in-out bg-gray-50/50"
+                                style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr', opacity: isExpanded ? 1 : 0 }}
+                             >
+                                 <div className="overflow-hidden">
+                                     <div className="p-4 border-t border-gray-100">
+                                         
+                                         {/* Inline Copy Action */}
+                                         <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                                             <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Inline Prescribed Regimen</h4>
+                                             {record.medications?.length > 0 && (
+                                                <button 
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const newMeds = record.medications.map((m: any) => ({ ...m, id: `Copied-${Math.random()}`, datePrescribed: new Date().toISOString() }));
+                                                        setPrescriptions([...prescriptions, ...newMeds]);
+                                                        toast.success("Medications instantly cloned to current regimen!");
+                                                    }}
+                                                    className="flex items-center gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white font-bold text-[11px] uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors border border-blue-200 shadow-sm"
+                                                >
+                                                    <Plus className="w-3.5 h-3.5" /> Clone All to Current
+                                                </button>
+                                             )}
+                                         </div>
+
+                                         <div className="space-y-2">
+                                            {record.medications?.length > 0 ? record.medications.map((med: any, idx: number) => (
+                                                <MedicationCard 
+                                                    key={med.id || Math.random()} 
+                                                    med={med} 
+                                                    index={idx} 
+                                                    updateMedication={() => {}} 
+                                                    removeMedication={() => {}} 
+                                                    isReadOnly={true}
+                                                />
+                                            )) : (
+                                                <p className="text-sm font-medium text-gray-500 text-center py-2 bg-white rounded-lg border border-gray-100">No medications mapped to this record.</p>
+                                            )}
+                                         </div>
+
+                                         {record.additionalNotes && (
+                                             <div className="mt-4 p-3 bg-amber-50/40 rounded-xl border border-amber-100/50">
+                                                 <span className="text-[10px] font-black uppercase text-amber-600 tracking-widest block mb-1">Advice Given</span>
+                                                 <p className="text-sm text-amber-900 font-medium">{record.additionalNotes}</p>
+                                             </div>
+                                         )}
+
+                                     </div>
+                                 </div>
+                             </div>
+                         </div>
+                     );
+                 })}
+             </div>
           </div>
       )}
     </div>

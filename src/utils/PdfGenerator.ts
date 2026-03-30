@@ -14,25 +14,44 @@ export const generateAndSharePrescription = async (htmlContent: string) => {
     document.body.appendChild(container);
 
     // Give browser a moment to render the content and load styles if any
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 800));
 
     // 2. Generate Canvas
     const canvas = await html2canvas(container, {
-      scale: 2, // Higher quality
+      scale: 3, // Higher quality for text
       useCORS: true,
-      logging: false
+      logging: false,
+      windowWidth: 820,
+      backgroundColor: '#ffffff'
     });
     
     // Clean up container
     document.body.removeChild(container);
 
-    // 3. Create PDF
-    const imgData = canvas.toDataURL('image/png');
+    // 3. Create PDF (Multi-page slicing algorithm)
     const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
     
-    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    const A4_HEIGHT_MM = 297;
+    const A4_WIDTH_MM = 210;
+    const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
+    const pageHeightPx = (canvas.width * A4_HEIGHT_MM) / A4_WIDTH_MM;
+    let yOffset = 0;
+
+    while (yOffset < canvas.height) {
+      if (yOffset > 0) pdf.addPage();
+      const sliceCanvas = document.createElement('canvas');
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = Math.min(pageHeightPx, canvas.height - yOffset);
+      const ctx = sliceCanvas.getContext('2d');
+      if (ctx) {
+         ctx.drawImage(canvas, 0, yOffset, canvas.width, sliceCanvas.height, 0, 0, canvas.width, sliceCanvas.height);
+      }
+      const sliceData = sliceCanvas.toDataURL('image/png');
+      const sliceHeightMm = (sliceCanvas.height * A4_WIDTH_MM) / canvas.width;
+      pdf.addImage(sliceData, 'PNG', 0, 0, pdfWidth, sliceHeightMm);
+      yOffset += pageHeightPx;
+    }
+    
     
     // 4. Get Blob and Share / Download
     const blob = pdf.output('blob');
@@ -47,8 +66,21 @@ export const generateAndSharePrescription = async (htmlContent: string) => {
       };
       
       if (navigator.canShare(shareData)) {
-        await navigator.share(shareData);
-        return;
+        try {
+          await navigator.share(shareData);
+          return;
+        } catch (shareErr: any) {
+          if (shareErr.name === 'NotAllowedError') {
+            console.warn("Web Share API gesture timeout triggered. Falling back to native download protocol...");
+            // Let it naturally drop through to the fallback download code below
+          } else if (shareErr.name !== 'AbortError') {
+             // AbortError is just the user cancelling the share sheet, ignore it
+             console.error("Non-critical share error:", shareErr);
+             return;
+          } else {
+             return; // User aborted share sheet natively
+          }
+        }
       }
     }
 

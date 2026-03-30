@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+// Force TS cache refresh
 import { Pill, Printer, Share2, FileText, Clock, Activity, X, Eye, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { SmartPrescriptionEngine } from '../../../components/Common/SmartPrescriptionEngine';
-import { generatePrescriptionHTML } from '../../../utils/PrescriptionPdfTemplate';
+import { generatePrescriptionHTML, DEFAULT_DOCTOR_INFO } from '../../../utils/PrescriptionPdfTemplate';
 import { generateAndSharePrescription } from '../../../utils/PdfGenerator';
+import { apiClient } from '../../../services/api/apiClient';
+import toast from 'react-hot-toast';
 import { HistoryModal } from '../../../components/Common/HistoryModal';
 import { ImageZoomModal } from '../../../components/Common/ImageZoomModal';
 
@@ -215,21 +218,48 @@ export const PrescriptionTab: React.FC<PrescriptionTabProps> = ({ formData, setF
     const incD = mode === 'diagnosis' || incB;
     const incI = mode === 'investigations' || incB;
 
-    const modifiedParams = {
-       bp: formData.inr, 
-       weight: formData.hb, 
-       temp: formData.others,
-       diagnosis: incD ? formData.diagnosis : undefined,
-       investigations: incI ? [...(formData.selectedInvestigations || []), formData.customInvestigations].filter(Boolean).join(', ') : undefined
-    };
+    const html = generatePrescriptionHTML({
+      patientName: formData.name || 'Unknown Patient',
+      age: formData.age || 'N/A',
+      gender: formData.sex || 'N/A',
+      patientId: patientId || formData.patientId,
+      address: formData.address,
+      vitals: {
+         bp: formData.bp, 
+         weight: formData.weight, 
+         height: formData.height,
+         temp: formData.temperature
+      },
+      diagnosis: incD ? formData.diagnosis : undefined,
+      advisedInvestigations: incI ? [...(formData.selectedInvestigations || []), formData.customInvestigations].filter(Boolean).join(', ') : undefined,
+      additionalNotes: formData.advice || formData.prescription || undefined,
+      medications: formData.medications || []
+    });
 
-    const html = generatePrescriptionHTML(
-      formData.name || 'Unknown Patient',
-      formData.age || 'N/A',
-      formData.sex || 'N/A',
-      modifiedParams,
-      formData.medications || []
-    );
+    const loadingToast = toast.loading('Saving prescription...');
+    try {
+      await apiClient.post('/patient-data', {
+          action: 'savePrescription',
+          payload: {
+              patientId: patientId || formData.patientId,
+              patientName: formData.name || 'Unknown Patient',
+              age: formData.age,
+              gender: formData.sex,
+              visitDate: new Date().toISOString(),
+              doctorName: DEFAULT_DOCTOR_INFO.name,
+              medications: formData.medications || [],
+              diagnosis: incD ? formData.diagnosis : null,
+              advisedInvestigations: incI ? [...(formData.selectedInvestigations || []), formData.customInvestigations].filter(Boolean).join(', ') : null,
+              additionalNotes: formData.advice || formData.prescription || null,
+              prescriptionDate: new Date().toISOString()
+          }
+      });
+      toast.success('Prescription saved successfully', { id: loadingToast });
+    } catch (error) {
+      console.error('Save prescription error:', error);
+      toast.error('Failed to save prescription. Aborting PDF generation.', { id: loadingToast });
+      return; 
+    }
 
     await generateAndSharePrescription(html);
   };
@@ -253,20 +283,6 @@ export const PrescriptionTab: React.FC<PrescriptionTabProps> = ({ formData, setF
             prescriptions={formData.medications || []} 
             setPrescriptions={(meds) => setFormData({...formData, medications: meds})}
             patientId={patientId} 
-            onGeneratePast={async (pastMeds: any) => {
-              const html = generatePrescriptionHTML(
-                formData.name || 'Unknown Patient',
-                formData.age || 'N/A',
-                formData.sex || 'N/A',
-                {
-                   bp: formData.inr, 
-                   weight: formData.hb, 
-                   temp: formData.others
-                },
-                pastMeds
-              );
-              await generateAndSharePrescription(html);
-            }}
           />
         </div>
       </div>

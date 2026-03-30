@@ -141,4 +141,22 @@ export const patientService = {
     });
     return parseResponse(response.data);
   },
+
+  // --- PRESCRIPTION MANAGEMENT SPECIFIC ---
+  getAllPrescriptions: async (): Promise<any[]> => {
+    const response = await apiClient.post('/patient-data', {
+      action: 'getAllPrescriptions'
+    });
+    const parsed = parseResponse(response.data);
+    return parsed || [];
+  },
+
+  getPatientPrescriptions: async (patientId: string): Promise<any[]> => {
+    const response = await apiClient.post('/patient-data', {
+      action: 'getPatientPrescriptions',
+      patientId
+    });
+    const parsed = parseResponse(response.data);
+    return parsed || [];
+  }
 };

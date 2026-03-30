@@ -24,6 +24,7 @@ const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
 const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
 const REPORTS_BUCKET = 'dr-gawli-patient-files-use2-5694';
 const VISITS_TABLE = 'Visits';
+const PRESCRIPTIONS_TABLE = 'Prescriptions'; // Dedicated storage for saved prescriptions
 
 // ============================================
 // PRESIGNED URL GENERATION FOR UPLOADS
@@ -562,9 +563,6 @@ export const handler = async (event, context) => {
             case 'validateRegistration':
                 return await validateRegistration(requestData);
 
-            case 'createPatient':
-                return await processPatientData(requestData);
-
             case 'confirmFileUpload':
                 return await confirmFileUpload(requestData);
 
@@ -593,22 +591,29 @@ export const handler = async (event, context) => {
                 return await updateVisitStatus(requestData);
 
             case 'getClinicalHistory':
-                return formatSuccessResponse(await fetchClinicalHistory(requestData.patientId));
+                return await fetchClinicalHistory(requestData.patientId);
 
             case 'getMedicalHistory':
                 return formatSuccessResponse(await fetchMedicalHistory(requestData.patientId));
 
-            case 'getReportsHistory':
-                return formatSuccessResponse(await fetchReportsHistory(requestData.patientId));
-
             case 'getDiagnosisHistory':
                 return formatSuccessResponse(await fetchDiagnosisHistory(requestData.patientId));
 
-            case 'getInvestigationsHistory':
-                return formatSuccessResponse(await fetchInvestigationsHistory(requestData.patientId));
+            // -- NEW PRESCRIPTIONS MODULE --
+            case 'savePrescription':
+                return await savePrescription(requestData.payload);
+                
+            case 'getPatientPrescriptions':
+                return await getPatientPrescriptions(requestData.patientId);
+                
+            case 'getAllPrescriptions':
+                return await getAllPrescriptions();
 
-            case 'getPrescriptionHistory':
-                return formatSuccessResponse(await fetchPrescriptionHistory(requestData.patientId));
+            case 'getReportsHistory':
+                return await fetchReportsHistory(requestData.patientId);
+
+            case 'getInvestigationsHistory':
+                return await fetchInvestigationsHistory(requestData.patientId);
 
             case 'getAllPatients':
                 return await getAllPatients();
@@ -988,10 +993,10 @@ async function fetchClinicalHistory(patientId) {
             }));
 
         console.log(`✅ Found ${clinicalHistory.length} clinical history entries in Visits`);
-        return { success: true, clinicalHistory };
+        return formatSuccessResponse({ success: true, clinicalHistory });
     } catch (error) {
         console.error(`❌ Clinical history fetch error:`, error.message);
-        return { success: false, clinicalHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
     }
 }
 
@@ -1001,20 +1006,21 @@ async function fetchMedicalHistory(patientId) {
         const visits = await _fetchCompletedVisits(patientId);
         
         const medicalHistory = visits
-            .filter(v => v.medicalHistory || v.newHistoryEntry || v.historyDetails)
+            .filter(v => v.newHistoryEntry || v.historyDetails || v.medicalHistory)
             .map(v => ({
                 visitId: v.visitId,
                 patientId: v.patientId,
                 createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
                 doctorName: v.doctorName || 'Dr. Tiwari',
-                historyDetails: v.medicalHistory || v.newHistoryEntry || v.historyDetails
+                historyDetails: v.newHistoryEntry || v.historyDetails || v.medicalHistory,
+                medicalHistory: v.medicalHistory || v.newHistoryEntry || v.historyDetails
             }));
 
         console.log(`✅ Found ${medicalHistory.length} medical history entries in Visits`);
-        return { success: true, medicalHistory };
+        return formatSuccessResponse({ success: true, medicalHistory });
     } catch (error) {
         console.error(`❌ Medical history fetch error:`, error.message);
-        return { success: false, medicalHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, medicalHistory: [], error: error.message });
     }
 }
 
@@ -1035,10 +1041,10 @@ async function fetchReportsHistory(patientId) {
             }));
 
         console.log(`✅ Found ${reportsHistory.length} reports history entries in Visits`);
-        return { success: true, reportsHistory };
+        return formatSuccessResponse({ success: true, reportsHistory });
     } catch (error) {
         console.error(`❌ Reports history fetch error:`, error.message);
-        return { success: false, reportsHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, reportsHistory: [], error: error.message });
     }
 }
 
@@ -1058,10 +1064,10 @@ async function fetchDiagnosisHistory(patientId) {
             }));
 
         console.log(`✅ Found ${diagnosisHistory.length} diagnosis history entries in Visits`);
-        return { success: true, diagnosisHistory };
+        return formatSuccessResponse({ success: true, diagnosisHistory });
     } catch (error) {
         console.error(`❌ Diagnosis history fetch error:`, error.message);
-        return { success: false, diagnosisHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, diagnosisHistory: [], error: error.message });
     }
 }
 
@@ -1082,33 +1088,10 @@ async function fetchInvestigationsHistory(patientId) {
             }));
 
         console.log(`✅ Found ${investigationsHistory.length} investigations history entries in Visits`);
-        return { success: true, investigationsHistory };
+        return formatSuccessResponse({ success: true, investigationsHistory });
     } catch (error) {
         console.error(`❌ Investigations history fetch error:`, error.message);
-        return { success: false, investigationsHistory: [], error: error.message };
-    }
-}
-
-async function fetchPrescriptionHistory(patientId) {
-    try {
-        console.log(`💊 Fetching prescription history for: ${patientId}`);
-        const visits = await _fetchCompletedVisits(patientId);
-        
-        const prescriptionHistory = visits
-            .filter(v => v.medications && v.medications.length > 0)
-            .map(v => ({
-                visitId: v.visitId,
-                patientId: v.patientId,
-                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
-                doctorName: v.doctorName || 'Dr. Tiwari',
-                medications: v.medications
-            }));
-
-        console.log(`✅ Found ${prescriptionHistory.length} prescription history entries in Visits`);
-        return { success: true, clinicalHistory: prescriptionHistory };
-    } catch (error) {
-        console.error(`❌ Prescription history fetch error:`, error.message);
-        return { success: false, clinicalHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, investigationsHistory: [], error: error.message });
     }
 }
 
@@ -1986,5 +1969,112 @@ async function addMedicine(requestData) {
     } catch (error) {
         console.error("❌ Error adding medicine:", error);
         return formatErrorResponse(`Add failed: ${error.message}`);
+    }
+}
+
+// ============================================
+// PRESCRIPTION MANAGEMENT MODULE
+// ============================================
+
+async function savePrescription(payload) {
+    console.log("💾 Executing savePrescription...", JSON.stringify(payload));
+    try {
+        const {
+            patientId,
+            patientName,
+            age,
+            gender,
+            visitDate,
+            doctorName,
+            medications,
+            diagnosis,
+            advisedInvestigations,
+            additionalNotes,
+            prescriptionDate
+        } = payload;
+
+        if (!patientId) return formatErrorResponse("Missing patientId");
+
+        const prescriptionId = randomUUID();
+        const timestamp = new Date().toISOString();
+
+        const item = {
+            prescriptionId,
+            patientId,
+            patientName: patientName || 'Unknown',
+            age: age || 'N/A',
+            gender: gender || 'N/A',
+            visitDate: visitDate || timestamp,
+            doctorName: doctorName || 'System',
+            medications: medications || [],
+            diagnosis: diagnosis || null,
+            advisedInvestigations: advisedInvestigations || null,
+            additionalNotes: additionalNotes || null,
+            prescriptionDate: prescriptionDate || timestamp,
+            createdAt: timestamp
+        };
+
+        await dynamodb.send(new PutCommand({
+            TableName: PRESCRIPTIONS_TABLE,
+            Item: item
+        }));
+
+        // Also update patient's most recent prescription date
+        try {
+            await dynamodb.send(new UpdateCommand({
+                TableName: PATIENTS_TABLE,
+                Key: { patientId },
+                UpdateExpression: "SET lastPrescriptionDate = :date",
+                ExpressionAttributeValues: { ":date": timestamp }
+            }));
+        } catch (updateErr) {
+            console.warn("Could not update patient lastPrescriptionDate, but prescription saved.", updateErr);
+        }
+
+        return formatSuccessResponse({
+            success: true,
+            prescriptionId,
+            message: "Prescription saved successfully."
+        });
+    } catch (error) {
+        console.error("❌ Error in savePrescription:", error);
+        return formatErrorResponse(error.message);
+    }
+}
+
+async function getPatientPrescriptions(patientId) {
+    if (!patientId) return formatErrorResponse("Missing patientId");
+    try {
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: PRESCRIPTIONS_TABLE,
+            IndexName: 'PatientIdIndex', // GSI required
+            KeyConditionExpression: "patientId = :pid",
+            ExpressionAttributeValues: {
+                ":pid": patientId
+            }
+        }));
+        return formatSuccessResponse(result.Items || []);
+    } catch (e) {
+        if (e.name === 'ValidationException') {
+            console.warn("GSI PatientIdIndex missing on Prescriptions. Falling back to Scan.");
+            const scan = await dynamodb.send(new ScanCommand({
+                TableName: PRESCRIPTIONS_TABLE,
+                FilterExpression: "patientId = :pid",
+                ExpressionAttributeValues: { ":pid": patientId }
+            }));
+            return formatSuccessResponse(scan.Items || []);
+        }
+        return formatErrorResponse(e.message);
+    }
+}
+
+async function getAllPrescriptions() {
+    try {
+        const result = await dynamodb.send(new ScanCommand({
+            TableName: PRESCRIPTIONS_TABLE
+        }));
+        return formatSuccessResponse(result.Items || []);
+    } catch (error) {
+        return formatErrorResponse(error.message);
     }
 }
