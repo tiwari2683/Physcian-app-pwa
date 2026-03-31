@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Image as ImageIcon, ExternalLink, Eye, X, Loader2, Cloud, Clock, RefreshCw } from 'lucide-react';
+import { FileText, Image as ImageIcon, ExternalLink, Eye, X, Loader2, Cloud, Clock, RefreshCw, Trash2 } from 'lucide-react';
 import type { LocalReportFile } from '../../services/uploadService';
 import { apiClient } from '../../services/api/apiClient';
 
@@ -7,6 +7,7 @@ import { apiClient } from '../../services/api/apiClient';
 
 interface S3FileRow {
   url: string;        // Presigned GET URL already embedded by Lambda enrichPatientFilesWithSignedUrls
+  s3Key: string;      // Raw S3 key — used for deletion
   name: string;
   type: string;       // MIME type e.g. "image/jpeg", "application/pdf"
   size?: number;
@@ -79,11 +80,11 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
 
   // ── Fetch historical S3 files whenever panel opens ──────────────────────────
   const fetchS3Files = async () => {
     if (!patientId || patientId.startsWith('draft_')) {
-      // New patient — no history yet, skip API call
       setS3Files([]);
       return;
     }
@@ -98,19 +99,38 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
       });
       const data = parseResponse(response.data) as Record<string, unknown>;
       const patient = (data.patient ?? data) as Record<string, unknown>;
-      const files: unknown[] = Array.isArray(patient.reportFiles) ? patient.reportFiles : [];
+
+      // Option A: patient.reportFiles = permanent registry (from Patients table)
+      //           activeVisit.reportFiles = session files (from Visits table)
+      // Merge both so the doctor sees everything in one panel.
+      const patientFiles: unknown[] = Array.isArray(patient.reportFiles) ? patient.reportFiles : [];
+
+      const activeVisit = data.activeVisit as Record<string, unknown> | null | undefined;
+      const visitFiles: unknown[] = Array.isArray(activeVisit?.reportFiles) ? activeVisit!.reportFiles as unknown[] : [];
+
+      // Deduplicate by s3Key — prefer visit version (more recent metadata)
+      const seenKeys = new Set<string>();
+      const allFiles: unknown[] = [];
+      for (const f of [...visitFiles, ...patientFiles]) {
+        const key = (f as Record<string, unknown>).s3Key as string | undefined;
+        if (key && seenKeys.has(key)) continue;
+        if (key) seenKeys.add(key);
+        allFiles.push(f);
+      }
 
       // Lambda's enrichPatientFilesWithSignedUrls populates file.url / file.signedUrl
-      const rows: S3FileRow[] = files.map((f: unknown) => {
+      const rows: S3FileRow[] = allFiles.map((f: unknown) => {
         const file = f as Record<string, unknown>;
-        const name = String(file.name ?? file.key ?? 'Unknown file');
+        const name = String(file.fileName ?? file.name ?? file.key ?? 'Unknown file');
         return {
           url: String(file.url ?? file.signedUrl ?? ''),
+          s3Key: String(file.s3Key ?? file.key ?? ''),
           name,
-          type: String(file.type ?? guessType(name)),
-          size: typeof file.size === 'number' ? file.size : undefined,
+          type: String(file.fileType ?? file.type ?? guessType(name)),
+          size: typeof file.fileSize === 'number' ? file.fileSize
+               : typeof file.size === 'number' ? file.size : undefined,
           category: file.category ? String(file.category) : undefined,
-          dateAdded: file.uploadDate ? String(file.uploadDate) : undefined,
+          dateAdded: file.uploadedAt ?? file.uploadDate ? String(file.uploadedAt ?? file.uploadDate) : undefined,
           isS3: true,
         };
       });
@@ -131,6 +151,29 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, patientId]);
+
+  // ── Remove a cloud file ──────────────────────────────────────────────────────
+  const handleRemoveFile = async (file: S3FileRow) => {
+    if (!patientId || !file.s3Key) return;
+    const confirmed = window.confirm(`Remove "${file.name}" permanently? This cannot be undone.`);
+    if (!confirmed) return;
+    setRemovingKey(file.s3Key);
+    try {
+      await apiClient.post('/patient-data', {
+        action: 'deletePatientFile',
+        patientId,
+        s3Key: file.s3Key,
+        fileName: file.name,
+      });
+      // Optimistic remove from local state
+      setS3Files(prev => prev.filter(f => f.s3Key !== file.s3Key));
+    } catch (err) {
+      console.error('[ViewUploadedFilesPanel] remove failed', err);
+      alert('Failed to remove file. Please try again.');
+    } finally {
+      setRemovingKey(null);
+    }
+  };
 
   // ── Build pending (locally picked, not yet uploaded) rows ───────────────────
   const pendingFiles: PendingFileRow[] = localFiles
@@ -264,23 +307,35 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
                         ].filter(Boolean).join(' · ')}
                         badge={<CloudBadge />}
                         actions={
-                          isImage(file.type) ? (
+                          <div className="flex items-center gap-1.5">
+                            {isImage(file.type) ? (
+                              <button
+                                onClick={() => file.url && onZoomImage(file.url)}
+                                disabled={!file.url}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> View
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => file.url && window.open(file.url, '_blank')}
+                                disabled={!file.url}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" /> Open
+                              </button>
+                            )}
                             <button
-                              onClick={() => file.url && onZoomImage(file.url)}
-                              disabled={!file.url}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                              onClick={() => handleRemoveFile(file)}
+                              disabled={removingKey === file.s3Key}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-40"
+                              title="Remove file"
                             >
-                              <Eye className="w-3.5 h-3.5" /> View
+                              {removingKey === file.s3Key
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <Trash2 className="w-3.5 h-3.5" />}
                             </button>
-                          ) : (
-                            <button
-                              onClick={() => file.url && window.open(file.url, '_blank')}
-                              disabled={!file.url}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" /> Open
-                            </button>
-                          )
+                          </div>
                         }
                       />
                     ))}

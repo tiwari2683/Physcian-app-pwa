@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { patientService } from '../../services/api/patientService';
 import { Search, ClipboardList, AlertCircle, RefreshCw, FileText } from 'lucide-react';

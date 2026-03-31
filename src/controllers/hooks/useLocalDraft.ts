@@ -18,7 +18,14 @@ export function useLocalDraft<T extends Record<string, unknown>>(
   // ── Initialise from existing draft (survives F5 because draftId is in the URL) ──
   const [formData, setFormData] = useState<T>(() => {
     const saved = DraftService.getDraft(draftId);
-    return saved ? (saved.formData as T) : initialData;
+    let initial = saved ? (saved.formData as T) : initialData;
+    
+    // Ghost cleanup: if legacy draft restoring metadata, silently wipe it
+    // because the binary blob is already permanently lost to JSON.stringify.
+    if (initial && typeof initial === 'object' && 'reportFiles' in initial) {
+        initial = { ...initial, reportFiles: [] };
+    }
+    return initial;
   });
 
   // ── Debounced auto-save ──────────────────────────────────────────────────────
@@ -30,7 +37,12 @@ export function useLocalDraft<T extends Record<string, unknown>>(
 
     // Schedule a write 500ms after the last state change
     debounceRef.current = setTimeout(() => {
-      DraftService.saveDraft(draftId, patientId, formData as Record<string, unknown>);
+      // Create a shallow copy and completely strip the binary file array bounds
+      const payloadToSave = { ...formData } as Record<string, unknown>;
+      if ('reportFiles' in payloadToSave) {
+          delete payloadToSave.reportFiles;
+      }
+      DraftService.saveDraft(draftId, patientId, payloadToSave);
     }, 500);
 
     return () => {

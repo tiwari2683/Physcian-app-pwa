@@ -266,6 +266,45 @@ async function handleGetPatient(patientId, forceRefresh = false) {
             patientData.reportFiles = await enrichPatientFilesWithSignedUrls(patientData.reportFiles);
         }
 
+        // â”€â”€ Fetch latest visit: WAITING/IN_PROGRESS first, then most recent COMPLETED
+        // This merges clinical data into getPatient so frontends need only one call.
+        let latestVisit = null;
+        try {
+            for (const vstatus of ["WAITING", "IN_PROGRESS"]) {
+                const vr = await dynamodb.send(new QueryCommand({
+                    TableName: VISITS_TABLE,
+                    IndexName: "patientId-status-index",
+                    KeyConditionExpression: "patientId = :pid AND #status = :s",
+                    ExpressionAttributeNames: { "#status": "status" },
+                    ExpressionAttributeValues: { ":pid": patientId, ":s": vstatus }
+                }));
+                if (vr.Items && vr.Items.length > 0) { latestVisit = vr.Items[0]; break; }
+            }
+            if (!latestVisit) {
+                const cv = await dynamodb.send(new QueryCommand({
+                    TableName: VISITS_TABLE,
+                    IndexName: "patientId-status-index",
+                    KeyConditionExpression: "patientId = :pid AND #status = :s",
+                    ExpressionAttributeNames: { "#status": "status" },
+                    ExpressionAttributeValues: { ":pid": patientId, ":s": "COMPLETED" },
+                    ScanIndexForward: false,
+                    Limit: 1
+                }));
+                if (cv.Items && cv.Items.length > 0) { latestVisit = cv.Items[0]; }
+            }
+        } catch (visitErr) {
+            console.warn("Could not fetch visit for getPatient merge:", visitErr.message);
+        }
+
+        // Enrich the visit's reportFiles with signed URLs so the doctor can preview them
+        if (latestVisit && Array.isArray(latestVisit.reportFiles) && latestVisit.reportFiles.length > 0) {
+            try {
+                latestVisit.reportFiles = await enrichPatientFilesWithSignedUrls(latestVisit.reportFiles);
+            } catch (enrichErr) {
+                console.warn("Could not enrich visit reportFiles:", enrichErr.message);
+            }
+        }
+
         // Get history data concurrently
         const [
             clinicalHistoryResponse,
@@ -294,7 +333,8 @@ async function handleGetPatient(patientId, forceRefresh = false) {
                 medicalHistory: medicalHistoryResponse.medicalHistory || [],
                 diagnosisHistory: diagnosisHistoryResponse.diagnosisHistory || [],
                 investigationsHistory: investigationsHistoryResponse.investigationsHistory || [],
-                freshData: forceRefresh
+                freshData: forceRefresh,
+                activeVisit: latestVisit
             })
         };
     } catch (error) {
@@ -1290,8 +1330,20 @@ async function updatePatientData(requestData) {
         const expressionAttributeNames = {};
         const expressionAttributeValues = {};
 
+        // Option A normalization: clinical fields belong in Visits, not Patients.
+        // Only route demographics + reportFiles to Patients table.
+        const CLINICAL_FIELDS = new Set(["diagnosis","medications","clinicalParameters","advisedInvestigations","treatment","medicalHistory","reportNotes","newHistoryEntry","reports"]);
+        // If visitId is provided, write clinical fields to Visits instead
+        const visitId = updateData.visitId || requestData.visitId;
+        const clinicalUpdate = {};
+        Object.keys(updateData).forEach(k => { if (CLINICAL_FIELDS.has(k)) clinicalUpdate[k] = updateData[k]; });
+        if (visitId && Object.keys(clinicalUpdate).length > 0) {
+            console.log(`[updatePatientData] Routing ${Object.keys(clinicalUpdate).length} clinical field(s) to Visits table for visit ${visitId}`);
+            await updateVisit({ visitId, ...clinicalUpdate });
+        }
+
         Object.keys(updateData).forEach((key) => {
-            if (key !== 'action' && key !== 'updateMode' && key !== 'patientId') {
+            if (key !== 'action' && key !== 'updateMode' && key !== 'patientId' && !CLINICAL_FIELDS.has(key)) {
                 const attrName = `#${key}`;
                 const attrValue = `:${key}`;
                 updateExpression.push(`${attrName} = ${attrValue}`);
@@ -1442,13 +1494,7 @@ async function processPatientData(requestData) {
             address: address || "",
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            reportFiles: [],
-            medications: [],
-            clinicalParameters: {},
-            diagnosis: "",
-            treatment: "",
-            prescription: "",
-            advisedInvestigations: ""
+            reportFiles: []         // canonical file registry only - clinical fields live in Visits
         };
 
         const params = {

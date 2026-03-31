@@ -139,7 +139,10 @@ export const NewVisitWizard = () => {
             // ── Complaint & Reports (Bug 2.3) ──
             // The assistant stores text notes as 'reportNotes', file array as 'reports'/'reportFiles'
             reports:          prev.reports     || activeVisit.reportNotes || activeVisit.reportDetails || '',
-            reportFiles:      mergeFiles(prev.reportFiles, activeVisit.reportFiles || []),
+            // Note: activeVisit.reportFiles are S3 read-only objects (presigned URLs).
+            // They are surfaced in ViewUploadedFilesPanel, NOT in formData.reportFiles
+            // which is reserved for LocalReportFile upload candidates only.
+            reportFiles: Array.isArray(prev.reportFiles) ? prev.reportFiles : [],
             newHistoryEntry:  prev.newHistoryEntry || activeVisit.medicalHistory || activeVisit.chiefComplaint || '',
             // ── Diagnosis & Investigations (Bug 2.2) ──
             diagnosis:              prev.diagnosis || activeVisit.diagnosis || activeVisit.diagnosisText || '',
@@ -155,11 +158,6 @@ export const NewVisitWizard = () => {
     fetchAssistantPrefill();
   }, [realPatientId, setFormData]);
 
-  const mergeFiles = (existing: any[], incoming: any[]): any[] => {
-    const names = new Set(existing.map(f => f.fileName || f.name));
-    const novel = incoming.filter(f => !names.has(f.fileName || f.name));
-    return [...existing, ...novel];
-  };
 
   // ─────────────────────────────────────────────
   // VALIDATION (inline, per-field)

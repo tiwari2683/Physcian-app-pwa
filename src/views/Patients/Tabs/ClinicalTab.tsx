@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { FileText, Image as ImageIcon, X, Eye, Upload, Calendar, Clock } from 'lucide-react';
+import { FileText, Image as ImageIcon, X, Eye, Upload, Calendar, Clock, AlertTriangle } from 'lucide-react';
 import { AutoBulletTextArea } from '../../../components/Common/AutoBulletTextArea';
 import { HistorySidebar } from '../../../components/Common/HistorySidebar';
 import { ImageZoomModal } from '../../../components/Common/ImageZoomModal';
@@ -397,11 +397,18 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
             <Upload className="w-5 h-5" /> Upload Report
           </button>
 
-          {formData.reportFiles?.length > 0 && (
+          {(() => {
+            // Only show files that have actual content to upload/preview.
+            // Ghost entries (draft-restored metadata with no binary and no URL) are filtered out.
+            const liveFiles = (formData.reportFiles || []).filter((f: any) =>
+              f.file instanceof File || f.previewUri || f.url || f.signedUrl || f.s3Url || f.fileUrl
+            );
+            if (liveFiles.length === 0) return null;
+            return (
             <div className="space-y-3">
-              <p className="text-sm font-bold text-gray-800">Uploaded Files: ({formData.reportFiles.length})</p>
+              <p className="text-sm font-bold text-gray-800">Files to Upload: ({liveFiles.length})</p>
               <div className="space-y-2">
-                {formData.reportFiles.map((f: any, idx: number) => (
+                {liveFiles.map((f: any, idx: number) => (
                    <div key={f.id || f.name || idx} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
                     <div className="flex items-center gap-3 overflow-hidden">
                       <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
@@ -416,19 +423,30 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => {
-                          // Prefer stable server URL > local blob (local blobs only exist in the current session)
-                          const stableUrl = f.s3Url || f.fileUrl || f.url || null;
-                          const localBlob = f.previewUri?.startsWith('blob:') ? f.previewUri : null;
-                          const resolvedUrl = stableUrl || localBlob;
-                          if (f.type === 'image' && resolvedUrl) setZoomedImageUrl(resolvedUrl);
-                        }}
-                        className="p-1.5 text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title={f.type === 'image' ? 'View full size' : 'Preview not available for documents'}
-                        disabled={f.type !== 'image'}
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
+                      {/* Eye / Open button — works for images AND documents */}
+                      {(() => {
+                        const stableUrl = f.s3Url || f.fileUrl || f.url || f.signedUrl || null;
+                        const localBlob  = f.previewUri?.startsWith('blob:') ? f.previewUri : null;
+                        const resolvedUrl = stableUrl || localBlob;
+                        const isImg = f.type === 'image'
+                          || String(f.type).startsWith('image/')
+                          || String(f.fileType).startsWith('image/');
+                        return (
+                          <button
+                            type="button"
+                            disabled={!resolvedUrl}
+                            onClick={() => {
+                              if (!resolvedUrl) return;
+                              if (isImg) setZoomedImageUrl(resolvedUrl);
+                              else window.open(resolvedUrl, '_blank');
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={resolvedUrl ? (isImg ? 'View full size' : 'Open document') : 'No preview available'}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        );
+                      })()}
                       <button type="button" onClick={() => removeFile(f.id)} className="p-1.5 text-red-400 hover:text-red-600 transition-colors">
                         <X className="w-4 h-4 border border-red-400 rounded-full" />
                       </button>
@@ -436,11 +454,20 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
                   </div>
                 ))}
               </div>
-              <p className="text-[10px] text-gray-400 italic leading-relaxed text-center px-4">
-                Files will be uploaded to S3 when you save this section. Make sure your internet connection is stable.
-              </p>
+              {liveFiles.some((f: any) => !f.uploadedToS3) && (
+                <div className="flex items-start gap-3 p-3.5 bg-amber-50 border border-amber-200 rounded-xl mt-4">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="text-amber-800">
+                    <p className="font-bold text-sm">Do not refresh or close this page.</p>
+                    <p className="text-xs font-medium mt-0.5 opacity-90 leading-snug">
+                       Files will be irrevocably lost if you refresh before clicking "Save Visit".
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+            );
+          })()}
 
           <button
             type="button"
