@@ -1479,6 +1479,49 @@ async function processPatientData(requestData) {
             return formatErrorResponse("Missing required field: name (fullName)");
         }
 
+        // ── DEDUPLICATION CHECK 1: explicit patientId ─────────────────────────
+        // If a specific patientId was provided (e.g. from the appointment record),
+        // check if it already exists and return it without creating a duplicate.
+        if (providedPatientId) {
+            const existingById = await dynamodb.send(new GetCommand({
+                TableName: PATIENTS_TABLE,
+                Key: { patientId: providedPatientId }
+            }));
+            if (existingById.Item) {
+                console.log(`♻️ Patient ${providedPatientId} already exists. Returning existing record.`);
+                return formatSuccessResponse({
+                    success: true,
+                    patientId: providedPatientId,
+                    message: "Existing patient record returned"
+                });
+            }
+        }
+
+        // ── DEDUPLICATION CHECK 2: mobile number ─────────────────────────────
+        // If a mobile number is supplied, scan for an existing patient with that
+        // number. A patient with the same mobile is treated as the same person
+        // to prevent duplicate records from repeated visits or check-ins.
+        // NOTE: No Limit here — DynamoDB's Limit applies BEFORE FilterExpression,
+        // so Limit: 1 could miss a matching patient that lives in a later page.
+        if (mobile) {
+            console.log(`🔍 Checking for existing patient with mobile: ${mobile}...`);
+            const mobileScan = await dynamodb.send(new ScanCommand({
+                TableName: PATIENTS_TABLE,
+                FilterExpression: 'mobile = :m',
+                ExpressionAttributeValues: { ':m': mobile }
+            }));
+            if (mobileScan.Items && mobileScan.Items.length > 0) {
+                const existing = mobileScan.Items[0];
+                console.log(`♻️ Found existing patient ${existing.patientId} with mobile ${mobile}. Returning existing record.`);
+                return formatSuccessResponse({
+                    success: true,
+                    patientId: existing.patientId,
+                    message: "Existing patient record returned"
+                });
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         console.log("🆕 Creating new patient...");
 
         // Generate patient ID if not provided
@@ -1519,6 +1562,7 @@ async function processPatientData(requestData) {
 /**
  * Initiate a new visit (Assistant Intake)
  * Creates a record in the Visits table with status WAITING
+ * Also ensures the patient exists in the Patients table (for new patients)
  */
 async function initiateVisit(requestData) {
     try {
@@ -1526,6 +1570,57 @@ async function initiateVisit(requestData) {
         
         if (!patientId) {
             return formatErrorResponse("Missing patientId");
+        }
+
+        // ── IDEMPOTENCY CHECK ────────────────────────────────────────────────
+        // Before creating a new visit, check if this patient already has an
+        // active WAITING or IN_PROGRESS visit. If so, return the existing
+        // visitId instead of creating a duplicate entry in the waiting room.
+        console.log(`🔍 Checking for existing active visit for patient ${patientId}...`);
+        const activeStatuses = ['WAITING', 'IN_PROGRESS'];
+        for (const status of activeStatuses) {
+            const existing = await dynamodb.send(new QueryCommand({
+                TableName: VISITS_TABLE,
+                IndexName: 'patientId-status-index',
+                KeyConditionExpression: 'patientId = :pid AND #status = :s',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: { ':pid': patientId, ':s': status }
+            }));
+            if (existing.Items && existing.Items.length > 0) {
+                const existingVisit = existing.Items[0];
+                console.log(`♻️ Patient ${patientId} already has an active visit (${existingVisit.visitId}). Returning existing visit.`);
+                return formatSuccessResponse({
+                    success: true,
+                    visitId: existingVisit.visitId,
+                    message: "Existing active visit returned"
+                });
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        console.log(`🔍 Checking if patient ${patientId} exists in Patients table...`);
+        const patientResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!patientResult.Item) {
+            console.log(`🆕 Patient ${patientId} not found. Creating new patient record...`);
+            const patientRecord = {
+                patientId,
+                name: name || "Unknown",
+                age: age ? parseInt(age) : 0,
+                sex: sex || "",
+                mobile: mobile || "",
+                address: address || "",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                reportFiles: [] // Canonical file registry
+            };
+            await dynamodb.send(new PutCommand({
+                TableName: PATIENTS_TABLE,
+                Item: patientRecord
+            }));
         }
 
         const visitId = `visit_${randomUUID()}`;
@@ -1536,12 +1631,12 @@ async function initiateVisit(requestData) {
             status: 'WAITING',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            // Chronic data context
-            name,
-            age: age ? parseInt(age) : 0,
-            sex,
-            mobile: mobile || "",
-            address: address || "",
+            // Chronic data context (fallback to existing patient data if missing)
+            name: name || (patientResult.Item ? patientResult.Item.name : "Unknown"),
+            age: age ? parseInt(age) : (patientResult.Item ? patientResult.Item.age : 0),
+            sex: sex || (patientResult.Item ? patientResult.Item.sex : ""),
+            mobile: mobile || (patientResult.Item ? patientResult.Item.mobile : ""),
+            address: address || (patientResult.Item ? patientResult.Item.address : ""),
             // Acute fields initialized
             diagnosis: "",
             medications: [],
