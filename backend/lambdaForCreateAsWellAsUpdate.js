@@ -307,15 +307,15 @@ async function handleGetPatient(patientId, forceRefresh = false) {
 
         // Get history data concurrently
         const [
-            clinicalHistoryResponse,
-            medicalHistoryResponse,
-            diagnosisHistoryResponse,
-            investigationsHistoryResponse
+            clinicalHistoryData,
+            medicalHistoryData,
+            diagnosisHistoryData,
+            investigationsHistoryData
         ] = await Promise.all([
-            fetchClinicalHistory(patientId),
-            fetchMedicalHistory(patientId),
-            fetchDiagnosisHistory(patientId),
-            fetchInvestigationsHistory(patientId)
+            _fetchClinicalHistoryData(patientId),
+            _fetchMedicalHistoryData(patientId),
+            _fetchDiagnosisHistoryData(patientId),
+            _fetchInvestigationsHistoryData(patientId)
         ]);
 
         return {
@@ -329,10 +329,10 @@ async function handleGetPatient(patientId, forceRefresh = false) {
             body: JSON.stringify({
                 success: true,
                 patient: patientData,
-                clinicalHistory: clinicalHistoryResponse.clinicalHistory || [],
-                medicalHistory: medicalHistoryResponse.medicalHistory || [],
-                diagnosisHistory: diagnosisHistoryResponse.diagnosisHistory || [],
-                investigationsHistory: investigationsHistoryResponse.investigationsHistory || [],
+                clinicalHistory: clinicalHistoryData.clinicalHistory || [],
+                medicalHistory: medicalHistoryData.medicalHistory || [],
+                diagnosisHistory: diagnosisHistoryData.diagnosisHistory || [],
+                investigationsHistory: investigationsHistoryData.investigationsHistory || [],
                 freshData: forceRefresh,
                 activeVisit: latestVisit
             })
@@ -634,10 +634,10 @@ export const handler = async (event, context) => {
                 return await fetchClinicalHistory(requestData.patientId);
 
             case 'getMedicalHistory':
-                return formatSuccessResponse(await fetchMedicalHistory(requestData.patientId));
+                return await fetchMedicalHistory(requestData.patientId);
 
             case 'getDiagnosisHistory':
-                return formatSuccessResponse(await fetchDiagnosisHistory(requestData.patientId));
+                return await fetchDiagnosisHistory(requestData.patientId);
 
             // -- NEW PRESCRIPTIONS MODULE --
             case 'savePrescription':
@@ -1017,7 +1017,7 @@ async function _fetchCompletedVisits(patientId) {
     return result.Items || [];
 }
 
-async function fetchClinicalHistory(patientId) {
+async function _fetchClinicalHistoryData(patientId) {
     try {
         console.log(`📊 Fetching clinical history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
@@ -1033,14 +1033,18 @@ async function fetchClinicalHistory(patientId) {
             }));
 
         console.log(`✅ Found ${clinicalHistory.length} clinical history entries in Visits`);
-        return formatSuccessResponse({ success: true, clinicalHistory });
+        return { success: true, clinicalHistory };
     } catch (error) {
         console.error(`❌ Clinical history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
+        return { success: false, clinicalHistory: [], error: error.message };
     }
 }
 
-async function fetchMedicalHistory(patientId) {
+async function fetchClinicalHistory(patientId) {
+    return formatSuccessResponse(await _fetchClinicalHistoryData(patientId));
+}
+
+async function _fetchMedicalHistoryData(patientId) {
     try {
         console.log(`🏥 Fetching medical history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
@@ -1057,14 +1061,18 @@ async function fetchMedicalHistory(patientId) {
             }));
 
         console.log(`✅ Found ${medicalHistory.length} medical history entries in Visits`);
-        return formatSuccessResponse({ success: true, medicalHistory });
+        return { success: true, medicalHistory };
     } catch (error) {
         console.error(`❌ Medical history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, medicalHistory: [], error: error.message });
+        return { success: false, medicalHistory: [], error: error.message };
     }
 }
 
-async function fetchReportsHistory(patientId) {
+async function fetchMedicalHistory(patientId) {
+    return formatSuccessResponse(await _fetchMedicalHistoryData(patientId));
+}
+
+async function _fetchReportsHistoryData(patientId) {
     try {
         console.log(`📄 Fetching reports history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
@@ -1081,14 +1089,18 @@ async function fetchReportsHistory(patientId) {
             }));
 
         console.log(`✅ Found ${reportsHistory.length} reports history entries in Visits`);
-        return formatSuccessResponse({ success: true, reportsHistory });
+        return { success: true, reportsHistory };
     } catch (error) {
         console.error(`❌ Reports history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, reportsHistory: [], error: error.message });
+        return { success: false, reportsHistory: [], error: error.message };
     }
 }
 
-async function fetchDiagnosisHistory(patientId) {
+async function fetchReportsHistory(patientId) {
+    return formatSuccessResponse(await _fetchReportsHistoryData(patientId));
+}
+
+async function _fetchDiagnosisHistoryData(patientId) {
     try {
         console.log(`🩺 Fetching diagnosis history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
@@ -1104,14 +1116,18 @@ async function fetchDiagnosisHistory(patientId) {
             }));
 
         console.log(`✅ Found ${diagnosisHistory.length} diagnosis history entries in Visits`);
-        return formatSuccessResponse({ success: true, diagnosisHistory });
+        return { success: true, diagnosisHistory };
     } catch (error) {
         console.error(`❌ Diagnosis history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, diagnosisHistory: [], error: error.message });
+        return { success: false, diagnosisHistory: [], error: error.message };
     }
 }
 
-async function fetchInvestigationsHistory(patientId) {
+async function fetchDiagnosisHistory(patientId) {
+    return formatSuccessResponse(await _fetchDiagnosisHistoryData(patientId));
+}
+
+async function _fetchInvestigationsHistoryData(patientId) {
     try {
         console.log(`🔬 Fetching investigations history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
@@ -1128,11 +1144,15 @@ async function fetchInvestigationsHistory(patientId) {
             }));
 
         console.log(`✅ Found ${investigationsHistory.length} investigations history entries in Visits`);
-        return formatSuccessResponse({ success: true, investigationsHistory });
+        return { success: true, investigationsHistory };
     } catch (error) {
         console.error(`❌ Investigations history fetch error:`, error.message);
-        return formatSuccessResponse({ success: false, investigationsHistory: [], error: error.message });
+        return { success: false, investigationsHistory: [], error: error.message };
     }
+}
+
+async function fetchInvestigationsHistory(patientId) {
+    return formatSuccessResponse(await _fetchInvestigationsHistoryData(patientId));
 }
 
 async function getAllPatients() {
@@ -1193,7 +1213,7 @@ async function searchPatients(requestData) {
         // Fetch all patients (DynamoDB Scan - for small datasets this is acceptable)
         const result = await dynamodb.send(new ScanCommand({
             TableName: PATIENTS_TABLE,
-            ProjectionExpression: "patientId, #n, age, sex, mobile, #s",
+            ProjectionExpression: "patientId, #n, age, sex, mobile, address, #s",
             ExpressionAttributeNames: {
                 "#n": "name",
                 "#s": "status"
@@ -1232,6 +1252,7 @@ async function searchPatients(requestData) {
             age: p.age ? String(p.age) : '0',
             sex: p.sex || 'N/A',
             mobile: p.mobile || '',
+            address: p.address || '',
             status: p.status || 'ACTIVE'
         }));
 
