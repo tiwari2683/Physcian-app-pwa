@@ -14,10 +14,13 @@ import { FitnessCertificateHistory } from '../views/FitnessCertificate/FitnessCe
 import { PrescriptionsList } from '../views/Prescriptions/PrescriptionsList';
 import { PatientPrescriptionHistory } from '../views/Prescriptions/PatientPrescriptionHistory';
 
+import { useRef } from 'react';
+
 /** Generates a UUID-stamped draft URL for new patients, placing the draft
- *  identity in the URL so it survives a page refresh (F5). */
+ *  identity in the URL so it survives a page refresh (F5).
+ *  useRef ensures the UUID is generated ONCE per mount, never on re-renders. */
 const NewPatientRedirect = () => {
-  const draftId = `draft_${crypto.randomUUID()}`;
+  const draftId = useRef(`draft_${crypto.randomUUID()}`).current;
   return <Navigate to={`/visit/new/${draftId}`} replace />;
 };
 

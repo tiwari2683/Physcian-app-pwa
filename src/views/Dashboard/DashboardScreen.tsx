@@ -200,58 +200,64 @@ export const DashboardScreen = () => {
         </div>
         
         <div className="p-6">
-          {[...waitingRoom].sort((a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          ).length === 0 ? (
-            <div className="text-center py-10 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-              <Clock className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-base font-semibold text-gray-900">Queue is empty</h3>
-              <p className="text-sm text-gray-500 max-w-sm mx-auto mt-1">
-                There are currently no patients waiting. Have the assistant register a new patient to populate the queue.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {waitingRoom.map((patient: any) => {
-                const arrivalTime = new Date(patient.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                const isStarting = startingVisitId === patient.visitId;
+          {(() => {
+            const sortedQueue = [...waitingRoom].sort((a, b) =>
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            );
+            if (sortedQueue.length === 0) {
+              return (
+                <div className="text-center py-10 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                  <Clock className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                  <h3 className="text-base font-semibold text-gray-900">Queue is empty</h3>
+                  <p className="text-sm text-gray-500 max-w-sm mx-auto mt-1">
+                    There are currently no patients waiting. Have the assistant register a new patient to populate the queue.
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-4">
+                {sortedQueue.map((patient: any, index: number) => {
+                  const arrivalTime = new Date(patient.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  const isStarting = startingVisitId === patient.visitId;
 
-                return (
-                  <div key={patient.visitId} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all gap-4">
-                    <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg shrink-0">
-                        {patient.name.charAt(0).toUpperCase()}
+                  return (
+                    <div key={patient.visitId || patient.patientId || index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg shrink-0">
+                          {patient.name?.charAt(0).toUpperCase() ?? '?'}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-gray-900 text-base">{patient.name}</h3>
+                          <p className="text-sm text-gray-500 font-medium">
+                            {patient.age}y • {patient.sex} • Arrived at {arrivalTime}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-bold text-gray-900 text-base">{patient.name}</h3>
-                        <p className="text-sm text-gray-500 font-medium">
-                          {patient.age}y • {patient.sex} • Arrived at {arrivalTime}
-                        </p>
-                      </div>
+
+                      <button
+                        onClick={() => handleStartConsultation(patient)}
+                        disabled={isStarting}
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold shadow-sm hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-70"
+                      >
+                        {isStarting ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Starting...
+                          </>
+                        ) : (
+                          <>
+                            <PlayCircle className="w-5 h-5 text-blue-100" />
+                            Start Consultation
+                          </>
+                        )}
+                      </button>
                     </div>
-                    
-                    <button
-                      onClick={() => handleStartConsultation(patient)}
-                      disabled={isStarting}
-                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold shadow-sm hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-70"
-                    >
-                      {isStarting ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Starting...
-                        </>
-                      ) : (
-                        <>
-                          <PlayCircle className="w-5 h-5 text-blue-100" />
-                          Start Consultation
-                        </>
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

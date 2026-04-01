@@ -85,10 +85,15 @@ function getAllDrafts(): DraftPatient[] {
     }
   }
 
-  return drafts.sort(
-    (a, b) =>
-      new Date(b.lastUpdatedAt).getTime() - new Date(a.lastUpdatedAt).getTime()
-  );
+  return drafts
+    .filter(d => {
+      const name = (d.formData?.name as string | undefined) ?? '';
+      return name.trim().length >= 2;
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.lastUpdatedAt).getTime() - new Date(a.lastUpdatedAt).getTime()
+    );
 }
 
 /**
