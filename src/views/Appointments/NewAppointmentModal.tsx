@@ -102,18 +102,38 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
         return () => clearTimeout(delayDebounceFn);
     }, [searchQuery, mode]);
 
-    const handleSelectPatient = (patient: any) => {
-        setSelectedPatientId(patient.patientId);
-        setFormData(prev => ({
-            ...prev,
-            patientName: patient.name || '',
-            age: patient.age ? patient.age.toString() : '',
-            mobile: patient.mobile || '',
-            sex: (patient.sex as 'Male' | 'Female' | 'Other') || 'Male',
-            address: patient.address || ''
-        }));
-        setSearchQuery('');
-        setSearchResults([]);
+    const handleSelectPatient = async (patient: any) => {
+        setIsSearching(true);
+        try {
+            // Fetch the full profile to guarantee we get the address and other complete details
+            const profile = await patientService.getPatientById(patient.patientId);
+
+            setSelectedPatientId(patient.patientId);
+            setFormData(prev => ({
+                ...prev,
+                patientName: profile.name || patient.name || '',
+                age: profile.age ? profile.age.toString() : (patient.age ? patient.age.toString() : ''),
+                mobile: profile.mobile || patient.mobile || '',
+                sex: (profile.sex as 'Male' | 'Female' | 'Other') || patient.sex || 'Male',
+                address: profile.address || patient.address || ''
+            }));
+        } catch (error) {
+            console.error("Failed to fetch full patient profile:", error);
+            // Fallback to search result data
+            setSelectedPatientId(patient.patientId);
+            setFormData(prev => ({
+                ...prev,
+                patientName: patient.name || '',
+                age: patient.age ? patient.age.toString() : '',
+                mobile: patient.mobile || '',
+                sex: (patient.sex as 'Male' | 'Female' | 'Other') || 'Male',
+                address: patient.address || ''
+            }));
+        } finally {
+            setSearchQuery('');
+            setSearchResults([]);
+            setIsSearching(false);
+        }
     };
 
     const handleChangeMode = (newMode: 'existing' | 'new') => {

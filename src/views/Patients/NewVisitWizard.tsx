@@ -20,6 +20,15 @@ const INITIAL_FORM_STATE = {
   medications: [] as any[]
 };
 
+// Mirror the same list used in DiagnosisTab so we can split known vs custom investigations
+const COMMON_INVESTIGATIONS = [
+  "Complete Blood Count (CBC)", "Blood Sugar - Fasting", "Blood Sugar - Post Prandial",
+  "HbA1c", "Lipid Profile", "Liver Function Test (LFT)", "Kidney Function Test (KFT)",
+  "Thyroid Profile", "Urine Routine", "X-Ray Chest", "X-Ray - Other",
+  "Ultrasound Abdomen", "ECG", "2D Echo", "CT Scan", "MRI",
+  "PFT (Pulmonary Function Test)", "Blood Pressure Monitoring"
+];
+
 const STEPS = [
   { id: 0, label: 'Patient Info' },
   { id: 1, label: 'Clinical' },
@@ -98,15 +107,27 @@ export const NewVisitWizard = () => {
           }
 
           const cp = activeVisit.clinicalParameters || {};
-          // Bug 2.2/2.3 Fix: Hydrate Diagnosis and Reports notes
-          let parsedInvestigations: string[] = [];
+
+          // ── Parse advisedInvestigations into known (checkboxes) + custom (textarea) ──
+          // The assistant packs everything into a JSON array. We need to split:
+          //   • Items matching COMMON_INVESTIGATIONS → selectedInvestigations (checks boxes)
+          //   • All other items                     → customInvestigations (free-text area)
+          let parsedKnownInvestigations: string[] = [];
+          let parsedCustomInvestigation = '';
           try {
             const raw = activeVisit.advisedInvestigations;
-            if (typeof raw === 'string' && raw.startsWith('[')) {
-              parsedInvestigations = JSON.parse(raw);
+            let allItems: string[] = [];
+            if (typeof raw === 'string' && raw.trim().startsWith('[')) {
+              allItems = JSON.parse(raw);
             } else if (Array.isArray(raw)) {
-              parsedInvestigations = raw;
+              allItems = raw;
+            } else if (typeof raw === 'string' && raw.trim()) {
+              // bullet-point format from doctor app: "• X-Ray\n• CBC"
+              allItems = raw.split('\n').map(l => l.replace(/^[\u2022\-\*]\s*/, '').trim()).filter(Boolean);
             }
+            parsedKnownInvestigations = allItems.filter(item => COMMON_INVESTIGATIONS.includes(item));
+            const customItems = allItems.filter(item => !COMMON_INVESTIGATIONS.includes(item));
+            parsedCustomInvestigation = customItems.join(', ');
           } catch (e) {
             console.error('Failed to parse investigations', e);
           }
@@ -120,6 +141,8 @@ export const NewVisitWizard = () => {
             mobile:  prev.mobile  || activeVisit.mobile  || '',
             address: prev.address || activeVisit.address || '',
             // ── Clinical vitals ──
+            // BUG FIX: Assistant saves as 'fastingHbA1c' (lowercase b), PWA state uses 'fastingHBA1C'.
+            // Read both keys so either format prefills correctly.
             inr:          prev.inr          || cp.inr          || '',
             hb:           prev.hb           || cp.hb           || '',
             wbc:          prev.wbc          || cp.wbc          || '',
@@ -131,23 +154,25 @@ export const NewVisitWizard = () => {
             tprAlb:       prev.tprAlb       || cp.tprAlb       || '',
             ureaCreat:    prev.ureaCreat    || cp.ureaCreat    || '',
             sodium:       prev.sodium       || cp.sodium       || '',
-            fastingHBA1C: prev.fastingHBA1C || cp.fastingHBA1C || '',
+            fastingHBA1C: prev.fastingHBA1C || cp.fastingHBA1C || cp.fastingHbA1c || '',
             pp:           prev.pp           || cp.pp           || '',
             tsh:          prev.tsh          || cp.tsh          || '',
             ft4:          prev.ft4          || cp.ft4          || '',
             others:       prev.others       || cp.others       || '',
-            // ── Complaint & Reports (Bug 2.3) ──
-            // The assistant stores text notes as 'reportNotes', file array as 'reports'/'reportFiles'
+            // ── Complaint & Reports ──
             reports:          prev.reports     || activeVisit.reportNotes || activeVisit.reportDetails || '',
-            // Note: activeVisit.reportFiles are S3 read-only objects (presigned URLs).
-            // They are surfaced in ViewUploadedFilesPanel, NOT in formData.reportFiles
-            // which is reserved for LocalReportFile upload candidates only.
             reportFiles: Array.isArray(prev.reportFiles) ? prev.reportFiles : [],
             newHistoryEntry:  prev.newHistoryEntry || activeVisit.medicalHistory || activeVisit.chiefComplaint || '',
-            // ── Diagnosis & Investigations (Bug 2.2) ──
+            // ── Diagnosis & Investigations ──
+            // BUG FIX: Split parsed array into known checkboxes + custom free-text
             diagnosis:              prev.diagnosis || activeVisit.diagnosis || activeVisit.diagnosisText || '',
-            selectedInvestigations: prev.selectedInvestigations?.length ? prev.selectedInvestigations : parsedInvestigations,
-            customInvestigations:   prev.customInvestigations || activeVisit.customInvestigations || '',
+            selectedInvestigations: prev.selectedInvestigations?.length
+              ? prev.selectedInvestigations
+              : parsedKnownInvestigations,
+            customInvestigations:   prev.customInvestigations
+              || activeVisit.customInvestigations
+              || parsedCustomInvestigation
+              || '',
           }));
         }
       } catch (err) {
