@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
+﻿import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -24,7 +24,7 @@ const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
 const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
 const REPORTS_BUCKET = 'dr-gawli-patient-files-use2-5694';
 const VISITS_TABLE = 'Visits';
-const PRESCRIPTIONS_TABLE = 'Prescriptions'; // Dedicated storage for saved prescriptions
+const PRESCRIPTIONS_TABLE = 'Prescriptions';
 
 // ============================================
 // PRESIGNED URL GENERATION FOR UPLOADS
@@ -266,43 +266,31 @@ async function handleGetPatient(patientId, forceRefresh = false) {
             patientData.reportFiles = await enrichPatientFilesWithSignedUrls(patientData.reportFiles);
         }
 
-        // â”€â”€ Fetch latest visit: WAITING/IN_PROGRESS first, then most recent COMPLETED
-        // This merges clinical data into getPatient so frontends need only one call.
-        let latestVisit = null;
+        // --- OPTION A MERGE: Fetch Active Visit ---
+        // This allows the frontends to resume the current workflow with a single call.
+        let activeVisit = null;
         try {
-            for (const vstatus of ["WAITING", "IN_PROGRESS"]) {
-                const vr = await dynamodb.send(new QueryCommand({
+            // Check for WAITING or IN_PROGRESS status
+            for (const status of ['WAITING', 'IN_PROGRESS']) {
+                const visitRecord = await dynamodb.send(new QueryCommand({
                     TableName: VISITS_TABLE,
-                    IndexName: "patientId-status-index",
-                    KeyConditionExpression: "patientId = :pid AND #status = :s",
-                    ExpressionAttributeNames: { "#status": "status" },
-                    ExpressionAttributeValues: { ":pid": patientId, ":s": vstatus }
+                    IndexName: 'patientId-status-index',
+                    KeyConditionExpression: "patientId = :pid AND #s = :status",
+                    ExpressionAttributeNames: { "#s": "status" },
+                    ExpressionAttributeValues: { ":pid": patientId, ":status": status }
                 }));
-                if (vr.Items && vr.Items.length > 0) { latestVisit = vr.Items[0]; break; }
-            }
-            if (!latestVisit) {
-                const cv = await dynamodb.send(new QueryCommand({
-                    TableName: VISITS_TABLE,
-                    IndexName: "patientId-status-index",
-                    KeyConditionExpression: "patientId = :pid AND #status = :s",
-                    ExpressionAttributeNames: { "#status": "status" },
-                    ExpressionAttributeValues: { ":pid": patientId, ":s": "COMPLETED" },
-                    ScanIndexForward: false,
-                    Limit: 1
-                }));
-                if (cv.Items && cv.Items.length > 0) { latestVisit = cv.Items[0]; }
+                if (visitRecord.Items && visitRecord.Items.length > 0) {
+                    activeVisit = visitRecord.Items[0];
+                    break;
+                }
             }
         } catch (visitErr) {
-            console.warn("Could not fetch visit for getPatient merge:", visitErr.message);
+            console.warn(`Could not fetch active visit for patient ${patientId}:`, visitErr.message);
         }
 
-        // Enrich the visit's reportFiles with signed URLs so the doctor can preview them
-        if (latestVisit && Array.isArray(latestVisit.reportFiles) && latestVisit.reportFiles.length > 0) {
-            try {
-                latestVisit.reportFiles = await enrichPatientFilesWithSignedUrls(latestVisit.reportFiles);
-            } catch (enrichErr) {
-                console.warn("Could not enrich visit reportFiles:", enrichErr.message);
-            }
+        // Enrich the active visit's reportFiles if present
+        if (activeVisit && Array.isArray(activeVisit.reportFiles) && activeVisit.reportFiles.length > 0) {
+            activeVisit.reportFiles = await enrichPatientFilesWithSignedUrls(activeVisit.reportFiles);
         }
 
         // Get history data concurrently
@@ -334,7 +322,7 @@ async function handleGetPatient(patientId, forceRefresh = false) {
                 diagnosisHistory: diagnosisHistoryData.diagnosisHistory || [],
                 investigationsHistory: investigationsHistoryData.investigationsHistory || [],
                 freshData: forceRefresh,
-                activeVisit: latestVisit
+                activeVisit: activeVisit
             })
         };
     } catch (error) {
@@ -481,7 +469,7 @@ async function getPatientHistory(requestData) {
 
     try {
         console.log(`🔍 Fetching history for patient: ${patientId}, type: ${type}`);
-        
+
         const command = new QueryCommand({
             TableName: VISITS_TABLE,
             IndexName: 'patientId-status-index',
@@ -489,7 +477,7 @@ async function getPatientHistory(requestData) {
             ExpressionAttributeValues: {
                 ':pid': patientId
             },
-            ScanIndexForward: false 
+            ScanIndexForward: false
         });
 
         const data = await dynamodb.send(command);
@@ -502,7 +490,7 @@ async function getPatientHistory(requestData) {
                 .map(item => ({
                     date: item.visitDate || item.visitId || new Date().toISOString(),
                     title: item.diagnosis.split('\n')[0] || 'Diagnosis',
-                    details: item.diagnosis, 
+                    details: item.diagnosis,
                     doctorName: item.doctorName || 'Dr. Tiwari'
                 }));
         } else if (type === 'investigations') {
@@ -596,7 +584,7 @@ export const handler = async (event, context) => {
         switch (action) {
             case 'getPatientHistory':
                 return await getPatientHistory(requestData);
-                
+
             case 'getPresignedUploadUrl':
                 return await generatePresignedUploadUrl(requestData);
 
@@ -636,21 +624,11 @@ export const handler = async (event, context) => {
             case 'getMedicalHistory':
                 return await fetchMedicalHistory(requestData.patientId);
 
-            case 'getDiagnosisHistory':
-                return await fetchDiagnosisHistory(requestData.patientId);
-
-            // -- NEW PRESCRIPTIONS MODULE --
-            case 'savePrescription':
-                return await savePrescription(requestData.payload);
-                
-            case 'getPatientPrescriptions':
-                return await getPatientPrescriptions(requestData.patientId);
-                
-            case 'getAllPrescriptions':
-                return await getAllPrescriptions();
-
             case 'getReportsHistory':
                 return await fetchReportsHistory(requestData.patientId);
+
+            case 'getDiagnosisHistory':
+                return await fetchDiagnosisHistory(requestData.patientId);
 
             case 'getInvestigationsHistory':
                 return await fetchInvestigationsHistory(requestData.patientId);
@@ -681,6 +659,15 @@ export const handler = async (event, context) => {
 
             case "deletePatient":
                 return await deletePatient(requestData);
+
+            case 'savePrescription':
+                return await savePrescription(requestData.payload);
+
+            case 'getPatientPrescriptions':
+                return await getPatientPrescriptions(requestData.patientId);
+
+            case 'getAllPrescriptions':
+                return await getAllPrescriptions();
 
             default:
                 // Legacy create/update operations (no action field)
@@ -1021,7 +1008,7 @@ async function _fetchClinicalHistoryData(patientId) {
     try {
         console.log(`📊 Fetching clinical history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
-        
+
         const clinicalHistory = visits
             .filter(v => v.clinicalParameters && Object.keys(v.clinicalParameters).length > 0)
             .map(v => ({
@@ -1048,7 +1035,7 @@ async function _fetchMedicalHistoryData(patientId) {
     try {
         console.log(`🏥 Fetching medical history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
-        
+
         const medicalHistory = visits
             .filter(v => v.newHistoryEntry || v.historyDetails || v.medicalHistory)
             .map(v => ({
@@ -1076,7 +1063,7 @@ async function _fetchReportsHistoryData(patientId) {
     try {
         console.log(`📄 Fetching reports history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
-        
+
         const reportsHistory = visits
             .filter(v => v.reportNotes || v.reports)
             .map(v => ({
@@ -1104,7 +1091,7 @@ async function _fetchDiagnosisHistoryData(patientId) {
     try {
         console.log(`🩺 Fetching diagnosis history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
-        
+
         const diagnosisHistory = visits
             .filter(v => v.diagnosis)
             .map(v => ({
@@ -1131,17 +1118,52 @@ async function _fetchInvestigationsHistoryData(patientId) {
     try {
         console.log(`🔬 Fetching investigations history for: ${patientId}`);
         const visits = await _fetchCompletedVisits(patientId);
-        
+
         const investigationsHistory = visits
             .filter(v => (v.advisedInvestigations && v.advisedInvestigations.length > 0) || v.customInvestigations)
-            .map(v => ({
-                visitId: v.visitId,
-                patientId: v.patientId,
-                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
-                doctorName: v.doctorName || 'Dr. Tiwari',
-                investigations: v.advisedInvestigations || [],
-                customInvestigations: v.customInvestigations || ""
-            }));
+            .map(v => {
+                // ── BUG #4 FIX: Normalize advisedInvestigations ──────────────────
+                // DynamoDB stores this as a raw bullet-point string from the doctor's
+                // app (e.g. "• X-Ray Chest\n• Blood Test"). Normalize it to a
+                // proper string[] so the frontend can render individual items.
+                let rawInv = v.advisedInvestigations || [];
+                if (typeof rawInv === 'string') {
+                    const trimmed = rawInv.trim();
+                    // \u2500\u2500 BUG #8 FIX: Detect JSON-serialized arrays vs bullet-point strings \u2500\u2500
+                    // The assistant portal serializes as JSON: "[\"X-Ray\",\"CBC\"]"
+                    // The doctor's mobile app uses bullet-point text: "\u2022 X-Ray\n\u2022 CBC"
+                    // Both must be correctly parsed into string[].
+                    if (trimmed.startsWith('[') || trimmed.startsWith('"')) {
+                        try {
+                            const parsed = JSON.parse(trimmed);
+                            rawInv = Array.isArray(parsed) ? parsed : [parsed].filter(Boolean);
+                        } catch {
+                            // Fallback: treat as bullet-point string
+                            rawInv = trimmed
+                                .split('\n')
+                                .map(line => line.replace(/^[\u2022\-\*]\s*/, '').trim())
+                                .filter(line => line.length > 0);
+                        }
+                    } else {
+                        // Plain bullet-point string from doctor's mobile app
+                        rawInv = trimmed
+                            .split('\n')
+                            .map(line => line.replace(/^[\u2022\-\*]\s*/, '').trim())
+                            .filter(line => line.length > 0);
+                    }
+                } else if (!Array.isArray(rawInv)) {
+                    rawInv = [];
+                }
+
+                return {
+                    visitId: v.visitId,
+                    patientId: v.patientId,
+                    createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                    doctorName: v.doctorName || 'Dr. Tiwari',
+                    investigations: rawInv,
+                    customInvestigations: v.customInvestigations || ""
+                };
+            });
 
         console.log(`✅ Found ${investigationsHistory.length} investigations history entries in Visits`);
         return { success: true, investigationsHistory };
@@ -1351,20 +1373,8 @@ async function updatePatientData(requestData) {
         const expressionAttributeNames = {};
         const expressionAttributeValues = {};
 
-        // Option A normalization: clinical fields belong in Visits, not Patients.
-        // Only route demographics + reportFiles to Patients table.
-        const CLINICAL_FIELDS = new Set(["diagnosis","medications","clinicalParameters","advisedInvestigations","treatment","medicalHistory","reportNotes","newHistoryEntry","reports"]);
-        // If visitId is provided, write clinical fields to Visits instead
-        const visitId = updateData.visitId || requestData.visitId;
-        const clinicalUpdate = {};
-        Object.keys(updateData).forEach(k => { if (CLINICAL_FIELDS.has(k)) clinicalUpdate[k] = updateData[k]; });
-        if (visitId && Object.keys(clinicalUpdate).length > 0) {
-            console.log(`[updatePatientData] Routing ${Object.keys(clinicalUpdate).length} clinical field(s) to Visits table for visit ${visitId}`);
-            await updateVisit({ visitId, ...clinicalUpdate });
-        }
-
         Object.keys(updateData).forEach((key) => {
-            if (key !== 'action' && key !== 'updateMode' && key !== 'patientId' && !CLINICAL_FIELDS.has(key)) {
+            if (key !== 'action' && key !== 'updateMode' && key !== 'patientId') {
                 const attrName = `#${key}`;
                 const attrValue = `:${key}`;
                 updateExpression.push(`${attrName} = ${attrValue}`);
@@ -1495,14 +1505,9 @@ async function processPatientData(requestData) {
     try {
         const { name, age, sex, mobile, address, patientId: providedPatientId } = requestData;
 
-        // Validate required fields - only 'name' is strictly required for the initial record
-        if (!name) {
-            return formatErrorResponse("Missing required field: name (fullName)");
-        }
+        if (!name) return formatErrorResponse("Missing required field: name (fullName)");
 
-        // ── DEDUPLICATION CHECK 1: explicit patientId ─────────────────────────
-        // If a specific patientId was provided (e.g. from the appointment record),
-        // check if it already exists and return it without creating a duplicate.
+        // DEDUP CHECK 1: explicit patientId
         if (providedPatientId) {
             const existingById = await dynamodb.send(new GetCommand({
                 TableName: PATIENTS_TABLE,
@@ -1518,14 +1523,8 @@ async function processPatientData(requestData) {
             }
         }
 
-        // ── DEDUPLICATION CHECK 2: mobile number ─────────────────────────────
-        // If a mobile number is supplied, scan for an existing patient with that
-        // number. A patient with the same mobile is treated as the same person
-        // to prevent duplicate records from repeated visits or check-ins.
-        // NOTE: No Limit here — DynamoDB's Limit applies BEFORE FilterExpression,
-        // so Limit: 1 could miss a matching patient that lives in a later page.
+        // DEDUP CHECK 2: mobile number
         if (mobile) {
-            console.log(`🔍 Checking for existing patient with mobile: ${mobile}...`);
             const mobileScan = await dynamodb.send(new ScanCommand({
                 TableName: PATIENTS_TABLE,
                 FilterExpression: 'mobile = :m',
@@ -1533,7 +1532,7 @@ async function processPatientData(requestData) {
             }));
             if (mobileScan.Items && mobileScan.Items.length > 0) {
                 const existing = mobileScan.Items[0];
-                console.log(`♻️ Found existing patient ${existing.patientId} with mobile ${mobile}. Returning existing record.`);
+                console.log(`♻️ Found existing patient ${existing.patientId} with mobile ${mobile}.`);
                 return formatSuccessResponse({
                     success: true,
                     patientId: existing.patientId,
@@ -1541,14 +1540,10 @@ async function processPatientData(requestData) {
                 });
             }
         }
-        // ─────────────────────────────────────────────────────────────────────
 
         console.log("🆕 Creating new patient...");
-
-        // Generate patient ID if not provided
         const newPatientId = providedPatientId || `patient_${randomUUID().split('-')[0]}`;
 
-        // Create patient record
         const patientRecord = {
             patientId: newPatientId,
             name,
@@ -1558,15 +1553,16 @@ async function processPatientData(requestData) {
             address: address || "",
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            reportFiles: []         // canonical file registry only - clinical fields live in Visits
+            reportFiles: [],
+            medications: [],
+            clinicalParameters: {},
+            diagnosis: "",
+            treatment: "",
+            prescription: "",
+            advisedInvestigations: ""
         };
 
-        const params = {
-            TableName: PATIENTS_TABLE,
-            Item: patientRecord
-        };
-
-        await dynamodb.send(new PutCommand(params));
+        await dynamodb.send(new PutCommand({ TableName: PATIENTS_TABLE, Item: patientRecord }));
         console.log(`✅ Patient created: ${newPatientId}`);
 
         return formatSuccessResponse({
@@ -1583,23 +1579,20 @@ async function processPatientData(requestData) {
 /**
  * Initiate a new visit (Assistant Intake)
  * Creates a record in the Visits table with status WAITING
- * Also ensures the patient exists in the Patients table (for new patients)
  */
 async function initiateVisit(requestData) {
     try {
         const { patientId, name, age, sex, mobile, address } = requestData;
-        
+
         if (!patientId) {
             return formatErrorResponse("Missing patientId");
         }
 
-        // ── IDEMPOTENCY CHECK ────────────────────────────────────────────────
-        // Before creating a new visit, check if this patient already has an
-        // active WAITING or IN_PROGRESS visit. If so, return the existing
-        // visitId instead of creating a duplicate entry in the waiting room.
+        // ── IDEMPOTENCY GUARD ──────────────────────────────────────────────
+        // Before creating anything, check if an active visit already exists.
+        // If yes, return the existing visitId — do NOT create a duplicate.
         console.log(`🔍 Checking for existing active visit for patient ${patientId}...`);
-        const activeStatuses = ['WAITING', 'IN_PROGRESS'];
-        for (const status of activeStatuses) {
+        for (const status of ['WAITING', 'IN_PROGRESS']) {
             const existing = await dynamodb.send(new QueryCommand({
                 TableName: VISITS_TABLE,
                 IndexName: 'patientId-status-index',
@@ -1609,7 +1602,7 @@ async function initiateVisit(requestData) {
             }));
             if (existing.Items && existing.Items.length > 0) {
                 const existingVisit = existing.Items[0];
-                console.log(`♻️ Patient ${patientId} already has an active visit (${existingVisit.visitId}). Returning existing visit.`);
+                console.log(`♻️ Patient ${patientId} already has an active visit (${existingVisit.visitId}). Returning existing.`);
                 return formatSuccessResponse({
                     success: true,
                     visitId: existingVisit.visitId,
@@ -1617,48 +1610,45 @@ async function initiateVisit(requestData) {
                 });
             }
         }
-        // ─────────────────────────────────────────────────────────────────────
+        // ──────────────────────────────────────────────────────────────────
 
-        console.log(`🔍 Checking if patient ${patientId} exists in Patients table...`);
+        // Auto-create patient record if it doesn't exist yet
         const patientResult = await dynamodb.send(new GetCommand({
             TableName: PATIENTS_TABLE,
             Key: { patientId }
         }));
 
         if (!patientResult.Item) {
-            console.log(`🆕 Patient ${patientId} not found. Creating new patient record...`);
-            const patientRecord = {
-                patientId,
-                name: name || "Unknown",
-                age: age ? parseInt(age) : 0,
-                sex: sex || "",
-                mobile: mobile || "",
-                address: address || "",
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                reportFiles: [] // Canonical file registry
-            };
+            console.log(`🆕 Patient ${patientId} not found. Creating patient record...`);
             await dynamodb.send(new PutCommand({
                 TableName: PATIENTS_TABLE,
-                Item: patientRecord
+                Item: {
+                    patientId,
+                    name: name || "Unknown",
+                    age: age ? parseInt(age) : 0,
+                    sex: sex || "",
+                    mobile: mobile || "",
+                    address: address || "",
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    reportFiles: []
+                }
             }));
         }
 
         const visitId = `visit_${randomUUID()}`;
-        
+
         const visitItem = {
             visitId,
             patientId,
             status: 'WAITING',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            // Chronic data context (fallback to existing patient data if missing)
-            name: name || (patientResult.Item ? patientResult.Item.name : "Unknown"),
-            age: age ? parseInt(age) : (patientResult.Item ? patientResult.Item.age : 0),
-            sex: sex || (patientResult.Item ? patientResult.Item.sex : ""),
-            mobile: mobile || (patientResult.Item ? patientResult.Item.mobile : ""),
-            address: address || (patientResult.Item ? patientResult.Item.address : ""),
-            // Acute fields initialized
+            name: name || (patientResult.Item?.name || "Unknown"),
+            age: age ? parseInt(age) : (patientResult.Item?.age || 0),
+            sex: sex || (patientResult.Item?.sex || ""),
+            mobile: mobile || (patientResult.Item?.mobile || ""),
+            address: address || (patientResult.Item?.address || ""),
             diagnosis: "",
             medications: [],
             clinicalParameters: {},
@@ -1781,7 +1771,7 @@ async function updateVisitStatus(requestData) {
         };
 
         await dynamodb.send(new UpdateCommand(params));
-        
+
         return formatSuccessResponse({
             success: true,
             message: `Visit status updated to ${status}`
@@ -1826,8 +1816,8 @@ async function completeVisit(requestData) {
                         Key: { visitId },
                         UpdateExpression: 'SET #status = :c, updatedAt = :t, completedAt = :t, diagnosis = :diag, medications = :meds, clinicalParameters = :vitals, reportNotes = :reports, medicalHistory = :hist, advisedInvestigations = :inv',
                         ExpressionAttributeNames: { '#status': 'status' },
-                        ExpressionAttributeValues: { 
-                            ':c': 'COMPLETED', 
+                        ExpressionAttributeValues: {
+                            ':c': 'COMPLETED',
                             ':t': timestamp,
                             ':diag': acuteData.diagnosis || "",
                             ':meds': acuteData.medications || [],
@@ -2134,25 +2124,12 @@ async function addMedicine(requestData) {
     }
 }
 
-// ============================================
-// PRESCRIPTION MANAGEMENT MODULE
-// ============================================
-
 async function savePrescription(payload) {
-    console.log("💾 Executing savePrescription...", JSON.stringify(payload));
     try {
         const {
-            patientId,
-            patientName,
-            age,
-            gender,
-            visitDate,
-            doctorName,
-            medications,
-            diagnosis,
-            advisedInvestigations,
-            additionalNotes,
-            prescriptionDate
+            patientId, patientName, age, gender, visitDate,
+            doctorName, medications, diagnosis,
+            advisedInvestigations, additionalNotes, prescriptionDate
         } = payload;
 
         if (!patientId) return formatErrorResponse("Missing patientId");
@@ -2181,7 +2158,7 @@ async function savePrescription(payload) {
             Item: item
         }));
 
-        // Also update patient's most recent prescription date
+        // Best-effort update of patient's last prescription date
         try {
             await dynamodb.send(new UpdateCommand({
                 TableName: PATIENTS_TABLE,
@@ -2190,7 +2167,7 @@ async function savePrescription(payload) {
                 ExpressionAttributeValues: { ":date": timestamp }
             }));
         } catch (updateErr) {
-            console.warn("Could not update patient lastPrescriptionDate, but prescription saved.", updateErr);
+            console.warn("Could not update lastPrescriptionDate:", updateErr.message);
         }
 
         return formatSuccessResponse({
@@ -2209,16 +2186,15 @@ async function getPatientPrescriptions(patientId) {
     try {
         const result = await dynamodb.send(new QueryCommand({
             TableName: PRESCRIPTIONS_TABLE,
-            IndexName: 'PatientIdIndex', // GSI required
+            IndexName: 'PatientIdIndex',
             KeyConditionExpression: "patientId = :pid",
-            ExpressionAttributeValues: {
-                ":pid": patientId
-            }
+            ExpressionAttributeValues: { ":pid": patientId }
         }));
         return formatSuccessResponse(result.Items || []);
     } catch (e) {
-        if (e.name === 'ValidationException') {
-            console.warn("GSI PatientIdIndex missing on Prescriptions. Falling back to Scan.");
+        // Graceful fallback if GSI doesn't exist yet
+        if (e.name === 'ValidationException' || e.name === 'ResourceNotFoundException') {
+            console.warn("GSI PatientIdIndex missing, falling back to Scan.");
             const scan = await dynamodb.send(new ScanCommand({
                 TableName: PRESCRIPTIONS_TABLE,
                 FilterExpression: "patientId = :pid",

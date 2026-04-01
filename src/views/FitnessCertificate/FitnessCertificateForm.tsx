@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
     ArrowLeft,
@@ -34,6 +34,8 @@ const SURGERY_FITNESS_OPTIONS = [
 ];
 
 const VALIDITY_OPTIONS = ["15 days", "30 days", "60 days", "90 days"];
+
+const DOCTOR_SIGNATURE_SVG = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 60' width='160' height='50'><path d='M10,45 C30,10 50,50 80,30 C110,10 130,45 160,25 C175,15 185,30 195,20' stroke='%231a1a6e' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
 
 export const FitnessCertificateForm = () => {
     const { patientId } = useParams<{ patientId: string }>();
@@ -212,6 +214,26 @@ export const FitnessCertificateForm = () => {
         }
     };
 
+    const certificateHtml = useMemo(() => {
+        const { styles, headerHtml, footerHtml, sections } = generateChunkedFitnessCertificate(formData, {
+            name: "Dr. Dipak Gawli",
+            credentials: "MBBS, DNB General Medicine",
+            signatureUrl: DOCTOR_SIGNATURE_SVG
+        });
+        const scopedStyles = styles
+            .replace(/body \{/g, '#certificate-preview-dom {')
+            .replace(/\* \{/g, '#certificate-preview-dom * {');
+
+        return `
+            <style>${scopedStyles}</style>
+            <div style="background: white; color: #1A202C; font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;">
+                ${headerHtml}
+                ${sections.map(s => s.html).join('')}
+                <div style="padding-top: 20px;">${footerHtml}</div>
+            </div>
+        `;
+    }, [formData]);
+
     const handleSave = async (): Promise<boolean> => {
         if (!formData.selectedOpinionType) {
             alert('Validation Error: Please select an opinion type (Surgery Fitness, Medication Modification, or Fitness Reserved For)');
@@ -364,27 +386,7 @@ export const FitnessCertificateForm = () => {
                             <div 
                                 id="certificate-preview-dom" 
                                 className="bg-white rounded-2xl shadow-xl shadow-blue-100/50 border border-t-[12px] border-blue-600 p-8 text-[11px] leading-relaxed overflow-hidden"
-                                dangerouslySetInnerHTML={{
-                                    __html: (() => {
-                                        const { styles, headerHtml, footerHtml, sections } = generateChunkedFitnessCertificate(formData, {
-                                            name: "Dr. Dipak Gawli",
-                                            credentials: "MBBS, DNB General Medicine",
-                                            signatureUrl: "https://upload.wikimedia.org/wikipedia/commons/f/fb/John_Hancock_signature.png"
-                                        });
-                                        const scopedStyles = styles
-                                            .replace(/body \{/g, '#certificate-preview-dom {')
-                                            .replace(/\* \{/g, '#certificate-preview-dom * {');
-                                            
-                                        return `
-                                            <style>${scopedStyles}</style>
-                                            <div style="background: white; color: #1A202C; font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;">
-                                                ${headerHtml}
-                                                ${sections.map(s => s.html).join('')}
-                                                <div style="padding-top: 20px;">${footerHtml}</div>
-                                            </div>
-                                        `;
-                                    })()
-                                }}
+                                dangerouslySetInnerHTML={{ __html: certificateHtml }}
                             />
                             
                             {/* Action Buttons (Moved below Preview) */}

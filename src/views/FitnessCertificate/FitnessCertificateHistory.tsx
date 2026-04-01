@@ -4,12 +4,10 @@ import {
     ArrowLeft, 
     Calendar, 
     Download, 
-    Copy, 
     FileText, 
     Loader2, 
     RefreshCcw,
     User,
-    ChevronRight,
     Search
 } from 'lucide-react';
 import { fitnessCertificateService } from '../../services/api/fitnessCertificateService';
@@ -64,14 +62,6 @@ export const FitnessCertificateHistory = () => {
     const handleDownloadPdf = (cert: FitnessCertificateFormData) => {
         setSelectedCert(cert);
         setIsPdfModalOpen(true);
-    };
-
-    // Section 7.1 — Strip metadata so a fresh cert is created
-    const handleCopyToNew = (cert: FitnessCertificateFormData) => {
-        const { certificateId, createdAt, ...cleanTemplate } = cert as any;
-        navigate(`/fitness-certificate/${patientId}`, { 
-            state: { templateData: cleanTemplate } 
-        });
     };
 
     const formatDate = (isoString?: string) => {
@@ -221,18 +211,10 @@ export const FitnessCertificateHistory = () => {
                             <div className="flex border-t border-gray-100 mt-auto">
                                 <button 
                                     onClick={() => handleDownloadPdf(item)}
-                                    className="flex-1 flex items-center justify-center gap-2 py-3.5 hover:bg-blue-50 transition-colors text-blue-600 font-bold text-sm border-r border-gray-100 group"
+                                    className="flex-1 flex items-center justify-center gap-2 py-3.5 hover:bg-blue-50 transition-colors text-blue-600 font-bold text-sm group"
                                 >
                                     <Download className="w-4 h-4 group-hover:translate-y-0.5 transition-transform" />
                                     PDF
-                                </button>
-                                <button 
-                                    onClick={() => handleCopyToNew(item)}
-                                    className="flex-1 flex items-center justify-center gap-2 py-3.5 hover:bg-gray-50 transition-colors text-gray-700 font-bold text-sm group"
-                                >
-                                    <Copy className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
-                                    Tap to Copy
-                                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:translate-x-0.5 transition-transform" />
                                 </button>
                             </div>
                         </div>

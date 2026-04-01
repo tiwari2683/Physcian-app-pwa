@@ -92,14 +92,17 @@ export const fitnessCertificateService = {
     fetchPrescriptionHistory: async (patientId: string): Promise<any[]> => {
         try {
             const response = await apiClient.post('/patient-data', {
-                action: "getPrescriptionHistory",
+                action: "getPatientPrescriptions",
                 patientId: patientId,
             });
             const parsedData = parseResponse(response.data);
             
-            // Note: The Lambda returns prescriptions inside the `clinicalHistory` key
-            if (parsedData.success && parsedData.clinicalHistory) {
-                return parsedData.clinicalHistory;
+            // Fix: Lambda returns the array of items directly (or inside success body)
+            if (Array.isArray(parsedData)) {
+                return parsedData;
+            }
+            if (parsedData.success && Array.isArray(parsedData.items)) {
+                return parsedData.items;
             }
             return [];
         } catch (error) {
