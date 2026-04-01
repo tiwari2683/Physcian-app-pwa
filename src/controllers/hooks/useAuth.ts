@@ -14,6 +14,7 @@ export const useAuth = () => {
     try {
       const token = await authService.getCurrentSessionToken();
       const decoded: any = jwtDecode(token);
+
       const user: User = {
         email: decoded.email,
         sub: decoded.sub,
@@ -21,19 +22,49 @@ export const useAuth = () => {
         jwtToken: token,
       };
       dispatch(setCredentials(user));
-    } catch (err) {
-      console.log('No active session found. User needs to log in.');
+    } catch (err: any) {
+      console.log('Session check failed or user needs to log in:', err.message);
+      authService.logout();
       dispatch(logoutUser());
     } finally {
       dispatch(setLoading(false));
     }
   }, [dispatch]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<'success' | 'new_password_required' | 'error'> => {
     setError(null);
     dispatch(setLoading(true));
     try {
-      const token = await authService.login(email, password);
+      const result = await authService.login(email, password);
+
+      if (result.type === 'NEW_PASSWORD_REQUIRED') {
+        dispatch(setLoading(false));
+        return 'new_password_required';
+      }
+
+      // type === 'SUCCESS'
+      const decoded: any = jwtDecode(result.token);
+      const user: User = {
+        email: decoded.email,
+        sub: decoded.sub,
+        name: decoded.name || decoded['cognito:username'],
+        jwtToken: result.token,
+      };
+      dispatch(setCredentials(user));
+      return 'success';
+    } catch (err: any) {
+      setError(err.message || 'Login failed. Please check your credentials.');
+      dispatch(setLoading(false));
+      return 'error';
+    }
+  };
+
+  // Called from ForceChangePasswordScreen after user enters a new password
+  const completeNewPassword = async (newPassword: string): Promise<boolean> => {
+    setError(null);
+    dispatch(setLoading(true));
+    try {
+      const token = await authService.completeNewPassword(newPassword);
       const decoded: any = jwtDecode(token);
       const user: User = {
         email: decoded.email,
@@ -44,7 +75,7 @@ export const useAuth = () => {
       dispatch(setCredentials(user));
       return true;
     } catch (err: any) {
-      setError(err.message || 'Login failed. Please check your credentials.');
+      setError(err.message || 'Failed to set new password.');
       dispatch(setLoading(false));
       return false;
     }
@@ -55,5 +86,5 @@ export const useAuth = () => {
     dispatch(logoutUser());
   };
 
-  return { login, logout, checkSession, error };
+  return { login, logout, checkSession, completeNewPassword, error };
 };

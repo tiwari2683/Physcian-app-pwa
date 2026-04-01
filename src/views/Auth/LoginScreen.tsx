@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../controllers/hooks/useAuth';
 import { useAppSelector } from '../../controllers/hooks/hooks';
 import { Stethoscope } from 'lucide-react';
@@ -13,10 +13,14 @@ export const LoginScreen = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const success = await login(email, password);
-    if (success) {
+    const result = await login(email, password);
+    if (result === 'success') {
       navigate('/dashboard', { replace: true });
+    } else if (result === 'new_password_required') {
+      // Cognito requires the user to set a permanent password (first-time login)
+      navigate('/change-password', { replace: true });
     }
+    // 'error' case: error state is already set in useAuth, displayed below
   };
 
   return (
@@ -59,7 +63,13 @@ export const LoginScreen = () => {
               placeholder="••••••••"
             />
           </div>
-          
+
+          <div className="flex justify-end -mt-2 mb-2">
+            <Link to="/forgot-password" className="text-sm font-medium text-blue-600 hover:text-blue-500 hover:underline">
+              Forgot password?
+            </Link>
+          </div>
+
           <button
             type="submit"
             disabled={isLoading}

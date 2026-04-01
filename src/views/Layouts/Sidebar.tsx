@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CalendarDays, FileText, Menu, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarDays, FileText, Menu, ClipboardList, Settings } from 'lucide-react';
 
 interface SidebarProps {
   expanded: boolean;
@@ -22,6 +22,7 @@ export const Sidebar = ({
     { name: 'Appointments', path: '/appointments', icon: CalendarDays },
     { name: 'Fitness Certificate', path: '/fitness-certificate', icon: FileText },
     { name: 'Prescriptions', path: '/prescriptions', icon: ClipboardList },
+    { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
   const sidebarClass = [
