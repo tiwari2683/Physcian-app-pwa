@@ -78,93 +78,72 @@ export const DashboardScreen = () => {
   };
 
   return (
-    <div className="p-4 lg:p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+    <div className="p-3 lg:p-6 space-y-3 lg:space-y-4 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between px-1">
+        <h1 className="text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">Dashboard</h1>
         {loadingWaitingRoom && !waitingRoom.length && (
-          <span className="text-sm font-medium text-blue-600 flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" /> Fetching Live Queue...
+          <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5 animate-pulse">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching Live Queue...
           </span>
         )}
       </div>
       
-      {/* ── Metrics Grid ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+      {/* ── Metrics Grid (Reduced Height) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {/* Waiting Room - Live */}
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-all hover:shadow-md">
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
-            <Clock className="w-6 h-6 lg:w-7 lg:h-7" />
+        <div className="bg-white/60 backdrop-blur-md p-3 rounded-xl shadow-sm border border-white/40 flex items-center gap-3 transition-all hover:shadow-md">
+          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+            <Clock className="w-5 h-5" />
           </div>
-          <div>
-            <p className="text-xs lg:text-sm font-medium text-gray-500">Waiting Room</p>
-            <p className="text-xl lg:text-2xl font-bold text-gray-900">{waitingRoom.length}</p>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">Waiting Room</p>
+            <p className="text-lg font-bold text-slate-900 leading-none mt-0.5">{waitingRoom.length}</p>
           </div>
         </div>
 
         {/* Total Patients - Live */}
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-all hover:shadow-md">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
-            <Users className="w-6 h-6 lg:w-7 lg:h-7" />
+        <div className="bg-white/60 backdrop-blur-md p-3 rounded-xl shadow-sm border border-white/40 flex items-center gap-3 transition-all hover:shadow-md">
+          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg shrink-0">
+            <Users className="w-5 h-5" />
           </div>
-          <div>
-            <p className="text-xs lg:text-sm font-medium text-gray-500">Total Patients</p>
-            <p className="text-xl lg:text-2xl font-bold text-gray-900">{patients.length || '...'}</p>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">Total Patients</p>
+            <p className="text-lg font-bold text-slate-900 leading-none mt-0.5">{patients.length || '...'}</p>
           </div>
         </div>
 
         {/* Today's Appointments - Live */}
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-all hover:shadow-md">
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
-            <Calendar className="w-6 h-6 lg:w-7 lg:h-7" />
+        <div className="bg-white/60 backdrop-blur-md p-3 rounded-xl shadow-sm border border-white/40 flex items-center gap-3 transition-all hover:shadow-md">
+          <div className="p-2 bg-amber-50 text-amber-600 rounded-lg shrink-0">
+            <Calendar className="w-5 h-5" />
           </div>
-          <div>
-            <p className="text-xs lg:text-sm font-medium text-gray-500">Appointments</p>
-            <p className="text-xl lg:text-2xl font-bold text-gray-900">{todaysAppointmentsCount}</p>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">Appointments</p>
+            <p className="text-lg font-bold text-slate-900 leading-none mt-0.5">{todaysAppointmentsCount}</p>
           </div>
         </div>
       </div>
 
-      {/* ── Action Buttons (Feature Parity with Native) ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <button
-          onClick={() => navigate('/doctor/visit/new')}
-          className="flex flex-col items-center justify-center gap-3 p-6 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition-all active:scale-95 group"
-        >
-          <div className="p-2.5 bg-white/20 rounded-full group-hover:scale-110 transition-transform">
-            <Users className="w-5 h-5" />
-          </div>
-          <span className="text-sm font-semibold">New Patient</span>
-        </button>
-
-        <button
-          onClick={() => navigate('/doctor/appointments')}
-          className="flex flex-col items-center justify-center gap-3 p-6 bg-amber-500 hover:bg-amber-600 text-white rounded-xl shadow-sm transition-all active:scale-95 group"
-        >
-          <div className="p-2.5 bg-white/20 rounded-full group-hover:scale-110 transition-transform">
-            <Calendar className="w-5 h-5" />
-          </div>
-          <span className="text-sm font-semibold">Appointments</span>
-        </button>
-
-        <button
-          onClick={() => navigate('/doctor/prescriptions')}
-          className="flex flex-col items-center justify-center gap-3 p-6 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-sm transition-all active:scale-95 group"
-        >
-          <div className="p-2.5 bg-white/20 rounded-full group-hover:scale-110 transition-transform">
-            <Activity className="w-5 h-5" />
-          </div>
-          <span className="text-sm font-semibold">Messages</span>
-        </button>
-
-        <button
-          onClick={() => navigate('/doctor/settings')}
-          className="flex flex-col items-center justify-center gap-3 p-6 bg-orange-500 hover:bg-orange-600 text-white rounded-xl shadow-sm transition-all active:scale-95 group"
-        >
-          <div className="p-2.5 bg-white/20 rounded-full group-hover:scale-110 transition-transform">
-            <RefreshCw className="w-5 h-5" />
-          </div>
-          <span className="text-sm font-semibold">Payments</span>
-        </button>
+      {/* ── Action Buttons (Horizontal Flow, Compact) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+        {[
+          { label: 'New Patient', path: '/doctor/visit/new', icon: Users, color: 'blue', grad: 'from-blue-500/5 to-indigo-500/5' },
+          { label: 'Appointments', path: '/doctor/appointments', icon: Calendar, color: 'amber', grad: 'from-amber-500/5 to-orange-500/5' },
+          { label: 'Messages', path: '/doctor/prescriptions', icon: Activity, color: 'teal', grad: 'from-teal-500/5 to-emerald-500/5' },
+          { label: 'Payments', path: '/doctor/settings', icon: RefreshCw, color: 'slate', grad: 'from-slate-500/5 to-slate-800/5' }
+        ].map((item, idx) => (
+          <button
+            key={idx}
+            onClick={() => navigate(item.path)}
+            className="group relative overflow-hidden p-2.5 bg-white/40 backdrop-blur-md border border-white/60 rounded-xl shadow-sm transition-all hover:shadow-md flex items-center gap-3 active:scale-98"
+          >
+            <div className={`absolute inset-0 bg-gradient-to-br ${item.grad} opacity-0 group-hover:opacity-100 transition-opacity`} />
+            <div className={`p-2 bg-${item.color}-50 text-${item.color}-600 rounded-lg group-hover:scale-105 transition-transform duration-200 shrink-0`}>
+              <item.icon className="w-4 h-4" />
+            </div>
+            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-tight truncate">{item.label}</span>
+          </button>
+        ))}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════
@@ -246,22 +225,22 @@ export const DashboardScreen = () => {
         </div>
       )}
 
-      {/* ── Live Waiting Room Queue ── */}
+      {/* ── Live Waiting Room Queue (Vertical Compression) ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+        <div className="p-3 lg:p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <div>
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
               Live Waiting Room
-              <span className="flex h-3 w-3 relative">
+              <span className="flex h-2.5 w-2.5 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
               </span>
             </h2>
-            <p className="text-sm text-gray-500 mt-1">Patients queued by the Assistant Panel</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">Queued by Assistant Panel</p>
           </div>
         </div>
         
-        <div className="p-6">
+        <div className="p-3 lg:p-4">
           {(() => {
             const sortedQueue = [...waitingRoom].sort((a, b) =>
               new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -284,15 +263,15 @@ export const DashboardScreen = () => {
                   const isStarting = startingVisitId === patient.visitId;
 
                   return (
-                    <div key={patient.visitId || patient.patientId || index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg shrink-0">
+                    <div key={patient.visitId || patient.patientId || index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-base shrink-0">
                           {patient.name?.charAt(0).toUpperCase() ?? '?'}
                         </div>
                         <div>
-                          <h3 className="font-bold text-gray-900 text-base">{patient.name}</h3>
-                          <p className="text-sm text-gray-500 font-medium">
-                            {patient.age}y • {patient.sex} • Arrived at {arrivalTime}
+                          <h3 className="font-bold text-gray-900 text-sm truncate max-w-[150px] sm:max-w-none">{patient.name}</h3>
+                          <p className="text-[11px] text-gray-500 font-medium">
+                            {patient.age}y • {patient.sex} • {arrivalTime}
                           </p>
                         </div>
                       </div>
@@ -300,16 +279,16 @@ export const DashboardScreen = () => {
                       <button
                         onClick={() => handleStartConsultation(patient)}
                         disabled={isStarting}
-                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold shadow-sm hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-70"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-bold text-xs shadow-sm hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-70"
                       >
                         {isStarting ? (
                           <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             Starting...
                           </>
                         ) : (
                           <>
-                            <PlayCircle className="w-5 h-5 text-blue-100" />
+                            <PlayCircle className="w-4 h-4 text-blue-100" />
                             Start Consultation
                           </>
                         )}
