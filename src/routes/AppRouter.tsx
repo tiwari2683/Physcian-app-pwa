@@ -1,30 +1,33 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './ProtectedRoute';
+import { RoleRoute } from './RoleRoute';
 import { LoginScreen } from '../views/Auth/LoginScreen';
 import { ForgotPasswordScreen } from '../views/Auth/ForgotPasswordScreen';
 import { ForceChangePasswordScreen } from '../views/Auth/ForceChangePasswordScreen';
-import { MainLayout } from '../views/Layouts/MainLayout';
-import { DashboardScreen } from '../views/Dashboard/DashboardScreen';
-import { PatientDirectory } from '../views/Patients/PatientDirectory';
-import { NewPatientRegistration } from '../views/Patients/NewPatientRegistration';
-import { NewVisitWizard } from '../views/Patients/NewVisitWizard';
-import AppointmentsList from '../views/Appointments/AppointmentsList';
+import { useAppSelector } from '../controllers/hooks/hooks';
 
-import { FitnessCertificateForm } from '../views/FitnessCertificate/FitnessCertificateForm';
-import { FitnessCertificateHistory } from '../views/FitnessCertificate/FitnessCertificateHistory';
-import { SettingsScreen } from '../views/Settings/SettingsScreen';
+// 1. Lazy Load the Sub-Apps for Code Splitting
+const DoctorRoutes = lazy(() => import('./DoctorRoutes'));
+const AssistantRoutes = lazy(() => import('./AssistantRoutes'));
 
-import { PrescriptionsList } from '../views/Prescriptions/PrescriptionsList';
-import { PatientPrescriptionHistory } from '../views/Prescriptions/PatientPrescriptionHistory';
+// 2. Loading Spinner for Suspense
+const LoadingSpinner = ({ message }: { message: string }) => (
+  <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50/50">
+    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+    <p className="text-gray-500 font-medium animate-pulse">{message}</p>
+  </div>
+);
 
-import { useRef } from 'react';
-
-/** Generates a UUID-stamped draft URL for new patients, placing the draft
- *  identity in the URL so it survives a page refresh (F5).
- *  useRef ensures the UUID is generated ONCE per mount, never on re-renders. */
-const NewPatientRedirect = () => {
-  const draftId = useRef(`draft_${crypto.randomUUID()}`).current;
-  return <Navigate to={`/visit/new/${draftId}`} replace />;
+// 3. Create the Root Redirector for the '/' path
+const RoleRedirector = () => {
+  const { user } = useAppSelector((state) => state.auth);
+  
+  if (user?.role === 'Doctor') return <Navigate to="/doctor/dashboard" replace />;
+  if (user?.role === 'Assistant') return <Navigate to="/assistant/dashboard" replace />;
+  
+  // Fallback if role is unassigned or invalid
+  return <Navigate to="/login" replace />;
 };
 
 export const AppRouter = () => {
@@ -34,35 +37,34 @@ export const AppRouter = () => {
         {/* Public Routes */}
         <Route path="/login" element={<LoginScreen />} />
         <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
-        {/* First-time login: Cognito requires the user to set a permanent password */}
         <Route path="/change-password" element={<ForceChangePasswordScreen />} />
 
-        {/* Protected Routes (Requires Authentication) */}
+        {/* Protected Parent Route (Authentication Guard) */}
         <Route element={<ProtectedRoute />}>
-          <Route element={<MainLayout />}>
-            <Route path="/dashboard" element={<DashboardScreen />} />
-            <Route path="/patients" element={<PatientDirectory />} />
-            <Route path="/patients/new" element={<NewPatientRegistration />} />
-            
-            {/* Fitness Certificate Routes */}
-            <Route path="/fitness-certificate" element={<PatientDirectory />} />
-            <Route path="/fitness-certificate/:patientId" element={<FitnessCertificateForm />} />
-            <Route path="/fitness-certificate/:patientId/history" element={<FitnessCertificateHistory />} />
+          
+          {/* Base Path Traffic Controller */}
+          <Route path="/" element={<RoleRedirector />} />
 
-            {/* Prescriptions Routes */}
-            <Route path="/prescriptions" element={<PrescriptionsList />} />
-            <Route path="/prescriptions/:patientId" element={<PatientPrescriptionHistory />} />
-
-            {/* New patient → generate a stable draft UUID in the URL */}
-            <Route path="/visit/new" element={<NewPatientRedirect />} />
-            {/* Handles both draft_<uuid> and real patientIds */}
-            <Route path="/visit/new/:patientId" element={<NewVisitWizard />} />
-            <Route path="/appointments" element={<AppointmentsList />} />
-            <Route path="/settings" element={<SettingsScreen />} />
-            
-            {/* Fallback route for authenticated users */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* Doctor Sandbox (Role Guard + Code Splitting) */}
+          <Route element={<RoleRoute allowedRole="Doctor" />}>
+            <Route path="/doctor/*" element={
+              <Suspense fallback={<LoadingSpinner message="Loading Physician Experience..." />}>
+                <DoctorRoutes />
+              </Suspense>
+            } />
           </Route>
+
+          {/* Assistant Sandbox (Role Guard + Code Splitting) */}
+          <Route element={<RoleRoute allowedRole="Assistant" />}>
+            <Route path="/assistant/*" element={
+              <Suspense fallback={<LoadingSpinner message="Loading Assistant Panel..." />}>
+                <AssistantRoutes />
+              </Suspense>
+            } />
+          </Route>
+
+          {/* Catch-all for authenticated users: redirect back to root for sort-out */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

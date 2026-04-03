@@ -24,7 +24,11 @@ export const fetchPatients = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const data = await patientService.getAllPatients();
-      return data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return data.sort((a, b) => {
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        return dateB - dateA;
+      });
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Failed to fetch patients. Please try again.');
     }

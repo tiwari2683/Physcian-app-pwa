@@ -41,6 +41,17 @@ export default defineConfig(({ mode }) => {
         }
       })
     ],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: (id) => {
+            if (id.includes('src/views/Assistant') || id.includes('src/controllers/assistant')) {
+              return 'assistant';
+            }
+          },
+        },
+      },
+    },
     define: {
       global: 'window',
     },

@@ -20,7 +20,9 @@ export const Header = ({ onMobileMenuClick }: HeaderProps) => {
         >
           <Menu />
         </button>
-        <h2 className="header-title hidden sm:block">Welcome, Dr. {user?.name || 'Physician'}</h2>
+        <h2 className="header-title hidden sm:block">
+          Welcome, {user?.role === 'Doctor' ? `Dr. ${user?.name || 'Physician'}` : user?.name || 'Staff'}
+        </h2>
       </div>
 
       <div className="flex items-center gap-4">

@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CalendarDays, FileText, Menu, ClipboardList, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarDays, FileText, Menu, ClipboardList, Settings, UserCircle } from 'lucide-react';
+import { useAppSelector } from '../../controllers/hooks/hooks';
 
 interface SidebarProps {
   expanded: boolean;
@@ -15,15 +16,29 @@ export const Sidebar = ({
   onMobileClose
 }: SidebarProps) => {
   const location = useLocation();
+  const { user } = useAppSelector((state) => state.auth);
+  const role = user?.role || 'Doctor';
+  const rolePath = `/${role.toLowerCase()}`;
 
-  const navItems = [
-    { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Patients', path: '/patients', icon: Users },
-    { name: 'Appointments', path: '/appointments', icon: CalendarDays },
-    { name: 'Fitness Certificate', path: '/fitness-certificate', icon: FileText },
-    { name: 'Prescriptions', path: '/prescriptions', icon: ClipboardList },
-    { name: 'Settings', path: '/settings', icon: Settings },
+  // Doctor-specific links
+  const doctorNavItems = [
+    { name: 'Dashboard', path: `${rolePath}/dashboard`, icon: LayoutDashboard },
+    { name: 'Patients', path: `${rolePath}/patients`, icon: Users },
+    { name: 'Appointments', path: `${rolePath}/appointments`, icon: CalendarDays },
+    { name: 'Fitness Certificate', path: `${rolePath}/fitness-certificate`, icon: FileText },
+    { name: 'Prescriptions', path: `${rolePath}/prescriptions`, icon: ClipboardList },
+    { name: 'Settings', path: `${rolePath}/settings`, icon: Settings },
   ];
+
+  // Assistant-specific links (Matches current PWA features available to assistants)
+  const assistantNavItems = [
+    { name: 'Dashboard', path: `${rolePath}/dashboard`, icon: LayoutDashboard },
+    { name: 'Appointments', path: `${rolePath}/appointments`, icon: CalendarDays },
+    { name: 'Patients', path: `${rolePath}/patients`, icon: Users },
+    { name: 'Settings', path: `${rolePath}/settings`, icon: Settings },
+  ];
+
+  const navItems = role === 'Doctor' ? doctorNavItems : assistantNavItems;
 
   const sidebarClass = [
     'sidebar',

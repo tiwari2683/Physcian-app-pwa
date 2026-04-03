@@ -211,6 +211,27 @@ export async function uploadFileWithPresignedUrl(
 }
 
 /**
+ * Request a presigned GET URL from the backend to securely view a file.
+ */
+export async function getPresignedGetUrl(
+  patientId: string,
+  s3Key: string
+): Promise<string | null> {
+  try {
+    const response = await apiClient.post('/patient-data', {
+      action: 'getPresignedGetUrl',
+      patientId,
+      s3Key,
+    });
+    const data = parseResponse(response.data) as { url?: string; success?: boolean; error?: string };
+    return data.url || null;
+  } catch (err: unknown) {
+    console.error(`[UploadService] getPresignedGetUrl failed:`, err);
+    return null;
+  }
+}
+
+/**
  * Upload multiple files in parallel batches of 3.
  *
  * @param files     — Only files where fileNeedsUpload() is true will be uploaded.

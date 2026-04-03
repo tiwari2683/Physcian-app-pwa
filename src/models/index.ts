@@ -4,19 +4,27 @@ export interface User {
   email: string;
   sub: string;
   name?: string;
+  role: 'Doctor' | 'Assistant';
   jwtToken?: string;
 }
 
 export interface Patient {
   patientId: string;
   name: string;
-  age: number;
-  sex: 'Male' | 'Female' | 'Other';   // matches DynamoDB & native app
-  mobile: string;                       // matches DynamoDB & native app
+  age: number | string;
+  sex: string;
+  mobile: string;
   address?: string;
   medicalHistory?: string[];
-  createdAt: string;
-  updatedAt: string;
+  diagnosis?: string;
+  treatment?: string;
+  prescription?: string;
+  advisedInvestigations?: string;
+  reports?: string;
+  medications?: any[];
+  reportFiles?: any[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Appointment {
@@ -25,13 +33,72 @@ export interface Appointment {
   patientName: string;
   age?: number | string;
   mobile?: string;
-  sex?: 'Male' | 'Female' | 'Other';
+  sex?: string;
   address?: string;
   date: string;
   time: string;
   type: string;
   status: 'Upcoming' | 'Completed' | 'Canceled';
 }
+
+// ── Assistant Panel Specific Extensions ──────────────────────────────────────
+
+export interface PatientBasic {
+  fullName: string;
+  age: string;
+  mobileNumber: string;
+  sex: 'Male' | 'Female' | 'Other';
+  address: string;
+}
+
+export interface ClinicalVitals {
+  inr?: string;
+  hb?: string;
+  wbc?: string;
+  platelet?: string;
+  bilirubin?: string;
+  sgot?: string;
+  sgpt?: string;
+  alt?: string;
+  tprAlb?: string;
+  ureaCreat?: string;
+  sodium?: string;
+  fastingHbA1c?: string;
+  pp?: string;
+  tsh?: string;
+  ft4?: string;
+  others?: string;
+  [key: string]: string | undefined;
+}
+
+export interface ClinicalData {
+  historyText: string;
+  reportNotes: string;
+  vitals: ClinicalVitals;
+  reports: any[];
+}
+
+export interface DiagnosisData {
+  diagnosisText: string;
+  selectedInvestigations: string[];
+  customInvestigations: string;
+}
+
+export interface Medication {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  instructions?: string;
+}
+
+export interface VisitHistoryItem {
+  timestamp: string;
+  doctorName?: string;
+  data: any;
+}
+
+// ── Shared Models ────────────────────────────────────────────────────────────
 
 export interface Prescription {
   prescriptionId: string;
@@ -56,3 +123,4 @@ export interface ApiErrorResponse {
   code?: string;
   status?: number;
 }
+

@@ -30,28 +30,25 @@ export const authService = {
           const tokenStr = idToken.getJwtToken();
           const payload = idToken.decodePayload();
 
-          // Strict Role Enforcement: must be a Doctor
           const role = payload['custom:role'];
           if (!role) {
             cognitoUser.signOut();
-            reject(new Error('Access Denied: Role attribute missing. Please ask your administrator to grant "custom:role" read permission in Cognito App Client settings.'));
+            reject(new Error('Access Denied: Role attribute missing. Current user has no role defined or App Client lacks "custom:role" read permission.'));
             return;
           }
-          if (role !== 'Doctor') {
+          if (role !== 'Doctor' && role !== 'Assistant') {
             cognitoUser.signOut();
-            reject(new Error('Access Denied: You must be a Doctor to log into this portal.'));
+            reject(new Error('Access Denied: Unauthorized role. Must be Doctor or Assistant.'));
             return;
           }
 
-          _pendingCognitoUser = null; // clear any stale pending user
+          _pendingCognitoUser = null;
           resolve({ type: 'SUCCESS', token: tokenStr });
         },
         onFailure: (err) => {
           reject(err);
         },
-        // Fires on first-time login when Cognito assigned a temporary password
         newPasswordRequired: (_userAttributes, _requiredAttributes) => {
-          // Store at module level — survives React component unmount/remount during navigation
           _pendingCognitoUser = cognitoUser;
           resolve({ type: 'NEW_PASSWORD_REQUIRED' });
         },
@@ -59,45 +56,31 @@ export const authService = {
     });
   },
 
-  // Called from ForceChangePasswordScreen after user enters their new permanent password
   completeNewPassword: (newPassword: string): Promise<string> => {
     return new Promise((resolve, reject) => {
       if (!_pendingCognitoUser) {
         reject(new Error('No active challenge. Please log in again.'));
         return;
       }
-
       const cognitoUser = _pendingCognitoUser;
-
       cognitoUser.completeNewPasswordChallenge(
         newPassword,
-        {}, // no additional required attributes
+        {},
         {
           onSuccess: (result) => {
             const idToken = result.getIdToken();
             const payload = idToken.decodePayload();
-
-            // Re-enforce role after password change
             const role = payload['custom:role'];
-            if (!role) {
+            if (!role || (role !== 'Doctor' && role !== 'Assistant')) {
               cognitoUser.signOut();
               _pendingCognitoUser = null;
-              reject(new Error('Access Denied: Role attribute missing. Current user has no role defined or App Client lacks "custom:role" read permission.'));
+              reject(new Error('Access Denied: Invalid or unauthorized role.'));
               return;
             }
-            if (role !== 'Doctor') {
-              cognitoUser.signOut();
-              _pendingCognitoUser = null;
-              reject(new Error('Access Denied: You must be a Doctor to log into this portal.'));
-              return;
-            }
-
-            _pendingCognitoUser = null; // challenge complete
+            _pendingCognitoUser = null;
             resolve(idToken.getJwtToken());
           },
-          onFailure: (err) => {
-            reject(err);
-          },
+          onFailure: (err) => reject(err),
         }
       );
     });
@@ -110,7 +93,6 @@ export const authService = {
         reject(new Error('No current user found'));
         return;
       }
-
       cognitoUser.getSession((err: Error | null, session: any) => {
         if (err) {
           reject(err);
@@ -119,14 +101,13 @@ export const authService = {
         if (session && session.isValid()) {
           const idToken = session.getIdToken();
           const payload = idToken.decodePayload();
+          const role = payload['custom:role'];
 
-          // Double-check role on session resume
-          if (payload['custom:role'] !== 'Doctor') {
+          if (role !== 'Doctor' && role !== 'Assistant') {
             cognitoUser.signOut();
-            reject(new Error('Access Denied: Doctor role required.'));
+            reject(new Error('Access Denied: Unauthorized role.'));
             return;
           }
-
           resolve(idToken.getJwtToken());
         } else {
           reject(new Error('Session invalid'));

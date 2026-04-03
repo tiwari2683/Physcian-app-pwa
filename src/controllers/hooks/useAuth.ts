@@ -19,6 +19,7 @@ export const useAuth = () => {
         email: decoded.email,
         sub: decoded.sub,
         name: decoded.name || decoded['cognito:username'],
+        role: decoded['custom:role'],
         jwtToken: token,
       };
       dispatch(setCredentials(user));
@@ -48,6 +49,7 @@ export const useAuth = () => {
         email: decoded.email,
         sub: decoded.sub,
         name: decoded.name || decoded['cognito:username'],
+        role: decoded['custom:role'],
         jwtToken: result.token,
       };
       dispatch(setCredentials(user));
@@ -70,6 +72,7 @@ export const useAuth = () => {
         email: decoded.email,
         sub: decoded.sub,
         name: decoded.name || decoded['cognito:username'],
+        role: decoded['custom:role'],
         jwtToken: token,
       };
       dispatch(setCredentials(user));
