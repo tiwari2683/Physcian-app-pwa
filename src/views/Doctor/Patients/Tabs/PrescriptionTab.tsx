@@ -45,7 +45,7 @@ const PdfOptionsDialog = ({ isOpen, onClose, onGenerate }: any) => {
 };
 
 // The RN Context Chip Array & Zero-Jank Modals
-const VisitContextSummary = ({ formData }: { formData: any }) => {
+const VisitContextSummary = ({ formData, patientId }: { formData: any, patientId?: string }) => {
    const [activeModal, setActiveModal] = useState<string | null>(null);
    const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
 
@@ -54,8 +54,39 @@ const VisitContextSummary = ({ formData }: { formData: any }) => {
      f.s3Url || f.url || f.fileUrl || (f.previewUri?.startsWith('blob:') ? f.previewUri : null) || null;
 
    const isImageFile = (f: any): boolean =>
-     (f.type === 'image' || (f.file?.type || '').startsWith('image/') ||
-     /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''));
+     (f.type === 'image' || (f.file?.type || f.fileType || '').startsWith('image/') ||
+     /\.(jpe?g|png|gif|webp)$/i.test(f.name || f.fileName || ''));
+
+   const handleViewReport = async (f: any) => {
+      let url = resolveViewUrl(f);
+      if (url) {
+         if (isImageFile(f)) setZoomedUrl(url);
+         else window.open(url, '_blank');
+         return;
+      }
+      if (f.s3Key) {
+         try {
+            const toastId = toast.loading('Opening securely...');
+            const response = await apiClient.post('/patient-data', {
+               action: 'getPresignedGetUrl',
+               patientId: patientId || formData.patientId,
+               s3Key: f.s3Key,
+            });
+            const data = (typeof response.data?.body === 'string' ? JSON.parse(response.data.body) : response.data?.body) || response.data;
+            toast.dismiss(toastId);
+            const resolvedUrl = data?.url || data?.signedUrl;
+            if (resolvedUrl) {
+               if (isImageFile(f)) setZoomedUrl(resolvedUrl);
+               else window.open(resolvedUrl, '_blank');
+            } else {
+               toast.error('Could not generate secure view link.');
+            }
+         } catch (err) {
+            toast.dismiss();
+            toast.error('Network error opening report.');
+         }
+      }
+   };
 
    return (
       <div className="bg-gradient-to-br from-blue-50/80 to-indigo-50/80 border border-blue-100/60 rounded-2xl p-4 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] animate-in slide-in-from-top-4 duration-500 mb-6 relative overflow-hidden">
@@ -136,7 +167,7 @@ const VisitContextSummary = ({ formData }: { formData: any }) => {
                                              ? <ImageIcon className="w-4 h-4 text-emerald-500" />
                                              : <FileText className="w-4 h-4 text-emerald-500" />}
                                         </div>
-                                        <p className="text-xs font-bold text-emerald-900 truncate">{f.name}</p>
+                                        <p className="text-xs font-bold text-emerald-900 truncate">{f.name || f.fileName || 'Unnamed Document'}</p>
                                      </div>
                                      {/* Action button: Eye for images, Open for documents */}
                                      {url ? (
@@ -157,11 +188,19 @@ const VisitContextSummary = ({ formData }: { formData: any }) => {
                                               <ExternalLink className="w-3.5 h-3.5" /> Open
                                            </button>
                                         )
+                                     ) : (f.s3Key ? (
+                                        <button
+                                           onClick={() => handleViewReport(f)}
+                                           className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors"
+                                           title="Securely fetch and view"
+                                        >
+                                           {img ? <><Eye className="w-3.5 h-3.5" /> View</> : <><ExternalLink className="w-3.5 h-3.5" /> Open</>}
+                                        </button>
                                      ) : (
                                         <span className="shrink-0 text-[10px] text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded-lg border border-amber-100">
                                            Pending upload
                                         </span>
-                                     )}
+                                     ))}
                                   </div>
                                );
                             })}
@@ -268,7 +307,7 @@ export const PrescriptionTab: React.FC<PrescriptionTabProps> = ({ formData, setF
     <div className="animate-in fade-in duration-300 pb-20">
       
       {/* ── Core Execution Guideline: Visit Context Summary (Mobile First, Zero-Jank) ── */}
-      <VisitContextSummary formData={formData} />
+      <VisitContextSummary formData={formData} patientId={patientId} />
       
       {/* ── Prescription & Medications Wrapper ── */}
       <div className="bg-white rounded-[20px] border border-gray-100/80 shadow-sm overflow-hidden mb-6">

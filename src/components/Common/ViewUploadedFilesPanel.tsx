@@ -13,6 +13,7 @@ interface S3FileRow {
   size?: number;
   category?: string;
   dateAdded?: string;
+  visitId?: string;
   isS3: true;
 }
 
@@ -81,6 +82,8 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [removingKey, setRemovingKey] = useState<string | null>(null);
+  const [currentVisitId, setCurrentVisitId] = useState<string | null>(null);
+  const [isVisitLocked, setIsVisitLocked] = useState<boolean>(false);
 
   // ── Fetch historical S3 files whenever panel opens ──────────────────────────
   const fetchS3Files = async () => {
@@ -106,7 +109,13 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
       const patientFiles: unknown[] = Array.isArray(patient.reportFiles) ? patient.reportFiles : [];
 
       const activeVisit = data.activeVisit as Record<string, unknown> | null | undefined;
-      const visitFiles: unknown[] = Array.isArray(activeVisit?.reportFiles) ? activeVisit!.reportFiles as unknown[] : [];
+      const visitIdRaw = activeVisit?.visitId ? String(activeVisit.visitId) : null;
+      setCurrentVisitId(visitIdRaw);
+      setIsVisitLocked(activeVisit?.visitStatus === 'completed');
+
+      const visitFiles: unknown[] = Array.isArray(activeVisit?.reportFiles) 
+        ? (activeVisit!.reportFiles as Record<string, unknown>[]).map(f => ({ ...f, visitId: visitIdRaw })) 
+        : [];
 
       // Deduplicate by s3Key — prefer visit version (more recent metadata)
       const seenKeys = new Set<string>();
@@ -131,6 +140,7 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
                : typeof file.size === 'number' ? file.size : undefined,
           category: file.category ? String(file.category) : undefined,
           dateAdded: file.uploadedAt ?? file.uploadDate ? String(file.uploadedAt ?? file.uploadDate) : undefined,
+          visitId: file.visitId ? String(file.visitId) : undefined,
           isS3: true,
         };
       });
@@ -287,61 +297,83 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
           ) : (
             <>
               {/* ── Cloud files (S3) ── */}
-              {visibleS3.length > 0 && (
-                <div>
-                  {filter === 'all' && (
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
-                      ☁ Cloud Storage
-                    </p>
-                  )}
-                  <div className="space-y-2">
-                    {visibleS3.map((file, idx) => (
-                      <FileCard
-                        key={`s3-${idx}`}
-                        name={file.name}
-                        type={file.type}
-                        meta={[
-                          file.size ? formatBytes(file.size) : null,
-                          file.category ?? null,
-                          file.dateAdded ? formatDate(file.dateAdded) : null,
-                        ].filter(Boolean).join(' · ')}
-                        badge={<CloudBadge />}
-                        actions={
-                          <div className="flex items-center gap-1.5">
-                            {isImage(file.type) ? (
-                              <button
-                                onClick={() => file.url && onZoomImage(file.url)}
-                                disabled={!file.url}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
-                              >
-                                <Eye className="w-3.5 h-3.5" /> View
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => file.url && window.open(file.url, '_blank')}
-                                disabled={!file.url}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" /> Open
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleRemoveFile(file)}
-                              disabled={removingKey === file.s3Key}
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-40"
-                              title="Remove file"
-                            >
-                              {removingKey === file.s3Key
-                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                : <Trash2 className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-                        }
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {visibleS3.length > 0 && (() => {
+                 const currentFiles = visibleS3.filter(f => currentVisitId && f.visitId === currentVisitId);
+                 const pastFiles = visibleS3.filter(f => !currentVisitId || f.visitId !== currentVisitId);
+
+                 const renderFileList = (files: S3FileRow[]) => (
+                   <div className="space-y-2">
+                     {files.map((file, idx) => {
+                       const isLocked = file.visitId === currentVisitId ? isVisitLocked : true; // Past reports always locked
+                       return (
+                         <FileCard
+                           key={`s3-${file.s3Key}-${idx}`}
+                           name={file.name}
+                           type={file.type}
+                           meta={[
+                             file.size ? formatBytes(file.size) : null,
+                             file.category ?? null,
+                             file.dateAdded ? formatDate(file.dateAdded) : null,
+                           ].filter(Boolean).join(' · ')}
+                           badge={<CloudBadge />}
+                           actions={
+                             <div className="flex items-center gap-1.5">
+                               {isImage(file.type) ? (
+                                 <button
+                                   onClick={() => file.url && onZoomImage(file.url)}
+                                   disabled={!file.url}
+                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                                 >
+                                   <Eye className="w-3.5 h-3.5" /> View
+                                 </button>
+                               ) : (
+                                 <button
+                                   onClick={() => file.url && window.open(file.url, '_blank')}
+                                   disabled={!file.url}
+                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-30"
+                                 >
+                                   <ExternalLink className="w-3.5 h-3.5" /> Open
+                                 </button>
+                               )}
+                               <button
+                                 onClick={() => handleRemoveFile(file)}
+                                 disabled={removingKey === file.s3Key || isLocked}
+                                 className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-40"
+                                 title={isLocked ? "Cannot delete reports from completed or past visits." : "Remove file"}
+                               >
+                                 {removingKey === file.s3Key
+                                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                   : <Trash2 className="w-3.5 h-3.5" />}
+                               </button>
+                             </div>
+                           }
+                         />
+                       );
+                     })}
+                   </div>
+                 );
+
+                 return (
+                   <div className="space-y-6">
+                     {currentFiles.length > 0 && (
+                       <div>
+                         <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 border-b border-blue-100 pb-1">
+                           📋 Current Visit Reports {isVisitLocked && "(Locked)"}
+                         </p>
+                         {renderFileList(currentFiles)}
+                       </div>
+                     )}
+                     {pastFiles.length > 0 && (
+                       <div>
+                         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2 border-b border-gray-100 pb-1">
+                           🕰️ Past Visit Reports
+                         </p>
+                         {renderFileList(pastFiles)}
+                       </div>
+                     )}
+                   </div>
+                 );
+              })()}
 
               {/* ── Pending files (local, not yet uploaded) ── */}
               {visiblePending.length > 0 && (

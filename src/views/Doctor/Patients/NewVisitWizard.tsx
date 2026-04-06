@@ -130,7 +130,7 @@ export const NewVisitWizard = () => {
             ft4:          prev.ft4          || cp.ft4          || '',
             others:       prev.others       || cp.others       || '',
             reports:          prev.reports     || activeVisit.reportNotes || activeVisit.reportDetails || '',
-            reportFiles: Array.isArray(prev.reportFiles) ? prev.reportFiles : [],
+            reportFiles: (prev.reportFiles && prev.reportFiles.length > 0) ? prev.reportFiles : (activeVisit.reportFiles || []),
             newHistoryEntry:  prev.newHistoryEntry || activeVisit.medicalHistory || activeVisit.chiefComplaint || '',
             diagnosis:              prev.diagnosis || activeVisit.diagnosis || activeVisit.diagnosisText || '',
             selectedInvestigations: prev.selectedInvestigations?.length ? prev.selectedInvestigations : parsedKnownInvestigations,
@@ -206,7 +206,8 @@ export const NewVisitWizard = () => {
         const { uploaded, failed } = await uploadFilesWithPresignedUrls(
           filesToUpload,
           realPatientId,
-          (done, total) => setUploadProgress(`Uploading ${done} of ${total} file(s)… Do not close this tab.`)
+          (done, total) => setUploadProgress(`Uploading ${done} of ${total} file(s)… Do not close this tab.`),
+          { visitId: activeVisitId || undefined, uploadedBy: 'doctor' }
         );
 
         processedReportFiles = [

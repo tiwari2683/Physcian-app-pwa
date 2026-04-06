@@ -78,7 +78,12 @@ export const OverviewTab: React.FC = () => {
 
             if (filesToUpload.length > 0) {
                 if (!resolvedId) throw new Error("Missing Patient ID for upload.");
-                const uploadResult = await UploadService.uploadFilesWithPresignedUrls(filesToUpload, resolvedId);
+                const uploadResult = await UploadService.uploadFilesWithPresignedUrls(
+                    filesToUpload, 
+                    resolvedId, 
+                    undefined, 
+                    { visitId: resolvedVisitId, uploadedBy: 'assistant' }
+                );
                 
                 for (const uploaded of uploadResult.uploaded) {
                     const idx = finalizedReports.findIndex(r => r.fileName === uploaded.name && r.isPending);

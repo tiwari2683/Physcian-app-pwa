@@ -292,11 +292,13 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
     e.target.value = '';
   };
 
-  const removeFile = (id: string) =>
+  const removeFile = (id: string) => {
+    if (!window.confirm("Are you sure you want to discard this pending file?")) return;
     setFormData({
       ...formData,
       reportFiles: (formData.reportFiles || []).filter((f: any) => f.id !== id)
     });
+  };
 
   const paramFields = [
     { key: 'inr',         label: 'INR (last)',            placeholder: 'ratio (0.8 - 1.2)' },

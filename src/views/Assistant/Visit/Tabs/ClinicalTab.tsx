@@ -226,6 +226,9 @@ export const ClinicalTab: React.FC = () => {
     };
 
     const handleRemoveReport = (idxToRemove: number) => {
+        if (!window.confirm("Are you sure you want to permanently delete this report?")) {
+            return;
+        }
         const updated = clinical.reports.filter((_, i) => i !== idxToRemove);
         dispatch(updateAsstClinicalDetails({ reports: updated }));
     };

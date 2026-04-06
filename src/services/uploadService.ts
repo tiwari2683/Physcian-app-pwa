@@ -131,7 +131,8 @@ async function putToS3(
 async function confirmFileUpload(
   patientId: string,
   s3Key: string,
-  file: LocalReportFile
+  file: LocalReportFile,
+  uploadContext?: { visitId?: string; uploadedBy: 'assistant' | 'doctor' }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await apiClient.post('/patient-data', {
@@ -142,6 +143,8 @@ async function confirmFileUpload(
       fileType: file.file?.type || 'application/octet-stream',
       category: file.type === 'image' ? 'Image' : 'Document',
       fileSize: file.file?.size ?? 0,
+      visitId: uploadContext?.visitId,
+      uploadedBy: uploadContext?.uploadedBy || 'unknown'
     });
     const data = parseResponse(response.data) as { success: boolean; error?: string };
     return data;
@@ -159,7 +162,8 @@ async function confirmFileUpload(
  */
 export async function uploadFileWithPresignedUrl(
   file: LocalReportFile,
-  patientId: string
+  patientId: string,
+  uploadContext?: { visitId?: string; uploadedBy: 'assistant' | 'doctor' }
 ): Promise<UploadedFileRecord | null> {
   // Skip guard — already uploaded
   if (!fileNeedsUpload(file)) {
@@ -192,7 +196,7 @@ export async function uploadFileWithPresignedUrl(
   const s3Key = presignedResponse.s3Key ?? presignedResponse.key!;
 
   // Step 3 — confirm with Lambda
-  const confirmResult = await confirmFileUpload(patientId, s3Key, file);
+  const confirmResult = await confirmFileUpload(patientId, s3Key, file, uploadContext);
   if (!confirmResult.success) {
     console.error(`[UploadService] confirm failed for ${file.name}:`, confirmResult.error);
     return null;
@@ -241,7 +245,8 @@ export async function getPresignedGetUrl(
 export async function uploadFilesWithPresignedUrls(
   files: LocalReportFile[],
   patientId: string,
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  uploadContext?: { visitId?: string; uploadedBy: 'assistant' | 'doctor' }
 ): Promise<{ uploaded: UploadedFileRecord[]; failed: string[] }> {
   const toUpload = files.filter(fileNeedsUpload);
   const uploaded: UploadedFileRecord[] = [];
@@ -256,7 +261,7 @@ export async function uploadFilesWithPresignedUrls(
   for (let i = 0; i < unique.length; i += batchSize) {
     const batch = unique.slice(i, i + batchSize);
     const results = await Promise.all(
-      batch.map(f => uploadFileWithPresignedUrl(f, patientId))
+      batch.map(f => uploadFileWithPresignedUrl(f, patientId, uploadContext))
     );
 
     results.forEach((result, idx) => {
