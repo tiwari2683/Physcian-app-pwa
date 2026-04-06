@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CalendarDays, FileText, Menu, ClipboardList, Settings, UserCircle } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarDays, FileText, Menu, ClipboardList, Settings } from 'lucide-react';
 import { useAppSelector } from '../../controllers/hooks/hooks';
 
 interface SidebarProps {

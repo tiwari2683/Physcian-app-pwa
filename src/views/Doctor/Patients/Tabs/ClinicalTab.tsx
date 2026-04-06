@@ -327,28 +327,23 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
         isExpanded={expanded.history}
         onToggle={() => toggle('history')}
       >
-        <div className="space-y-4 pt-3">
-          <div className="flex justify-between items-center mb-1">
-            <p className="text-sm text-gray-500 font-medium">History/Complaints/Symptoms:</p>
+        <div className="space-y-3 pt-2">
+          <div className="flex justify-between items-center mb-0.5">
+            <p className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Complaint/Symptoms:</p>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); fetchClinicalHistory('getMedicalHistory'); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors shrink-0"
+              className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-bold hover:bg-blue-100 transition-colors shrink-0"
             >
-              <Clock className="w-3.5 h-3.5" />
-              History
+              <Clock className="w-3 h-3" /> History
             </button>
           </div>
           <AutoBulletTextArea
-            rows={6}
-            placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
+            rows={4}
+            placeholder="Enter history..."
             value={formData.newHistoryEntry || ''}
             onChangeText={text => handleChange('newHistoryEntry', text)}
           />
-
-          <p className="text-xs text-gray-400">
-            Tip: Start a line with "-" to create a bulleted list
-          </p>
         </div>
       </SectionCard>
 

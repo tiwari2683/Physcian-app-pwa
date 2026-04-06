@@ -12,11 +12,13 @@ import { PrescriptionsList } from '../views/Doctor/Prescriptions/PrescriptionsLi
 import { PatientPrescriptionHistory } from '../views/Doctor/Prescriptions/PatientPrescriptionHistory';
 import { useRef } from 'react';
 
+import { generateUUID } from '../utils/uuid';
+
 /** Generates a UUID-stamped draft URL for new patients, placing the draft
  *  identity in the URL so it survives a page refresh (F5).
  *  useRef ensures the UUID is generated ONCE per mount, never on re-renders. */
 const NewPatientRedirect = () => {
-  const draftId = useRef(`draft_${crypto.randomUUID()}`).current;
+  const draftId = useRef(`draft_${generateUUID()}`).current;
   return <Navigate to={`/doctor/visit/new/${draftId}`} replace />;
 };
 

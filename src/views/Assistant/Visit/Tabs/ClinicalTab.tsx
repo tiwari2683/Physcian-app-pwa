@@ -5,6 +5,7 @@ import { Card, Button, Input } from '../../components/UI';
 import { usePendingFiles } from '../../../../contexts/PendingFilesContext';
 import * as UploadService from '../../../../services/uploadService';
 import { Camera, FileUp, FileText, History as HistoryIcon, Table, X, MoreHorizontal, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import { generateUUID } from '../../../../utils/uuid';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vitals field schema — single source of truth for both Grid and Compare views
@@ -238,7 +239,7 @@ export const ClinicalTab: React.FC = () => {
         if (!file) return;
 
         try {
-            const fileId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(7);
+            const fileId = generateUUID();
             const localUrl = URL.createObjectURL(file);
             
             // Stage physical file in Context

@@ -208,7 +208,7 @@ export const DiagnosisTab: React.FC<DiagnosisTabProps> = ({ formData, setFormDat
               History
             </button>
           </div>
-          <div className="bg-gray-50/50 p-4 rounded-xl border border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="bg-gray-50/50 p-3 rounded-xl border border-gray-100 grid grid-cols-2 gap-x-3 gap-y-1.5">
             {COMMON_INVESTIGATIONS.map((inv) => (
               <label key={inv} className="flex items-center gap-3 cursor-pointer group p-1.5 hover:bg-white rounded-lg transition-colors">
                 <input 

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { patientService } from '../../../services/api/patientService';
 import { generatePrescriptionHTML } from '../../../utils/PrescriptionPdfTemplate';
 import { generateAndSharePrescription } from '../../../utils/PdfGenerator';
-import { ArrowLeft, Share2, Download, AlertCircle, RefreshCw, FileText, Calendar, Clock, Pill, User } from 'lucide-react';
+import { ArrowLeft, Share2, Download, AlertCircle, RefreshCw, FileText, Calendar, Clock, Pill, User, Eye } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const PatientPrescriptionHistory = () => {
@@ -67,7 +67,7 @@ export const PatientPrescriptionHistory = () => {
         return Array.from(groups.entries());
     }, [prescriptions]);
 
-    const handleGeneratePdf = async (record: any, mode: 'share' | 'download') => {
+    const handleGeneratePdf = async (record: any, mode: 'share' | 'download' | 'view') => {
         if (generatingId) return;
         setGeneratingId(record.prescriptionId || 'active');
         
@@ -91,18 +91,7 @@ export const PatientPrescriptionHistory = () => {
                 prescriptionDate: record.prescriptionDate || record.visitDate || undefined
             });
 
-            if (mode === 'download') {
-                // Direct download fallback path natively inside generateAndSharePrescription
-                // NOTE: To bypass Share API entirely, we can temporarily hack navigator.share but 
-                // generateAndSharePrescription internally checks navigator.share. 
-                // As instructed: "Download triggers the browser download fallback path directly".
-                const originalShare = navigator.share;
-                Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
-                await generateAndSharePrescription(html);
-                Object.defineProperty(navigator, 'share', { value: originalShare, configurable: true });
-            } else {
-                await generateAndSharePrescription(html);
-            }
+            await generateAndSharePrescription(html, mode);
         } catch (err) {
             console.error('PDF Generation Error:', err);
             toast.error('Failed to generate PDF');
@@ -125,38 +114,46 @@ export const PatientPrescriptionHistory = () => {
 
     return (
         <div className="flex-1 bg-[#F8FAFC] min-h-screen pb-20">
-            {/* Header */}
-            <div className="bg-white px-6 pt-5 pb-6 border-b border-gray-100/80 sticky top-0 z-10 shadow-sm">
-                <button 
-                    onClick={() => navigate('/doctor/prescriptions')}
-                    className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors font-bold text-sm mb-4"
-                >
-                    <ArrowLeft className="w-4 h-4" /> Back to Prescriptions
-                </button>
+            {/* Main Content Area */}
+            <div className="p-4 md:p-6 max-w-4xl mx-auto">
                 
-                <div className="flex items-start justify-between">
-                    <div>
-                        <h1 className="text-2xl font-black tracking-tight text-gray-900 flex items-center gap-3">
-                            <div className="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center border border-indigo-100">
-                                <User className="w-5 h-5 text-indigo-600" />
+                {/* Navigation & Patient Profile Card */}
+                <div className="mb-8">
+                    <button 
+                        onClick={() => navigate('/doctor/prescriptions')}
+                        className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors font-bold text-sm mb-4 pl-1"
+                    >
+                        <ArrowLeft className="w-4 h-4" /> Back to Prescriptions
+                    </button>
+                    
+                    <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl p-6 shadow-[0_8px_30px_rgb(79,70,229,0.2)] relative overflow-hidden">
+                        {/* Decorative Background Elements */}
+                        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+                        <div className="absolute bottom-0 left-0 -mb-8 -ml-8 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
+                        
+                        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/20 shadow-inner shrink-0">
+                                    <User className="w-7 h-7 text-white" />
+                                </div>
+                                <div>
+                                    <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white mb-1">
+                                        {patientInfo?.name || 'Loading Patient...'}
+                                    </h1>
+                                    {patientInfo && (
+                                        <div className="flex items-center flex-wrap gap-2 text-sm text-indigo-100 font-medium">
+                                            <span className="font-mono text-xs opacity-90 uppercase bg-indigo-900/40 px-2 py-0.5 rounded-md tracking-wider">ID: {patientId}</span>
+                                            <span className="w-1 h-1 bg-indigo-300 rounded-full"></span>
+                                            <span>{patientInfo.age}y</span>
+                                            <span className="w-1 h-1 bg-indigo-300 rounded-full"></span>
+                                            <span>{patientInfo.gender}</span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            {patientInfo?.name || 'Loading Patient...'}
-                        </h1>
-                        {patientInfo && (
-                            <div className="flex items-center gap-2 mt-2 text-sm text-gray-500 font-bold ml-1">
-                                <span>ID: {patientId}</span>
-                                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
-                                <span>{patientInfo.age}y</span>
-                                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
-                                <span>{patientInfo.gender}</span>
-                            </div>
-                        )}
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            {/* Main Content Area */}
-            <div className="p-6 max-w-4xl mx-auto">
                 {loading ? (
                     <div className="space-y-6">
                         {[1, 2].map(i => (
@@ -233,20 +230,29 @@ export const PatientPrescriptionHistory = () => {
                                                     </div>
 
                                                     {/* Action Buttons */}
-                                                    <div className="flex items-center gap-3 shrink-0 pt-2 md:pt-0">
+                                                    <div className="flex items-center gap-2 shrink-0 pt-2 md:pt-0">
+                                                        <button 
+                                                            disabled={!!generatingId}
+                                                            onClick={() => handleGeneratePdf(record, 'view')}
+                                                            className="flex items-center justify-center gap-1.5 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-xl font-bold transition-all shadow-sm flex-1 md:flex-none text-sm"
+                                                        >
+                                                            {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4 text-emerald-600" />}
+                                                            View
+                                                        </button>
+
                                                         <button 
                                                             disabled={!!generatingId}
                                                             onClick={() => handleGeneratePdf(record, 'download')}
-                                                            className="flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm flex-1 md:flex-none"
+                                                            className="flex items-center justify-center gap-1.5 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-xl font-bold transition-all shadow-sm flex-1 md:flex-none text-sm"
                                                         >
-                                                            {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                                            Download
+                                                            {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 text-gray-500" />}
+                                                            Save
                                                         </button>
                                                         
                                                         <button 
                                                             disabled={!!generatingId}
                                                             onClick={() => handleGeneratePdf(record, 'share')}
-                                                            className="flex items-center justify-center gap-2 bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm flex-1 md:flex-none"
+                                                            className="flex items-center justify-center gap-1.5 bg-indigo-50 border border-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-xl font-bold transition-all shadow-sm flex-1 md:flex-none text-sm"
                                                         >
                                                             {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
                                                             Share

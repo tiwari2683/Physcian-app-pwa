@@ -66,21 +66,21 @@ const VisitContextSummary = ({ formData }: { formData: any }) => {
                <span className="w-2 h-2 rounded-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.6)]"></span>
                <span className="text-xs font-black text-blue-900 uppercase tracking-widest">Visit Context Summary</span>
             </div>
-            <span className="text-[9px] font-black text-blue-500 uppercase bg-white px-2.5 py-1 rounded-full border border-blue-200 shadow-sm tracking-wider">In-Memory Sync</span>
+            <span className="text-[8px] font-black text-blue-400 uppercase bg-transparent px-1.5 py-0.5 rounded-full border border-blue-100 tracking-widest leading-none">In-Memory Sync</span>
          </div>
          
          <div className="flex flex-wrap gap-2 relative z-10">
-            <button onClick={() => setActiveModal('history')} className="flex flex-1 items-center justify-center gap-2 bg-white border border-gray-100 px-3 py-3 rounded-xl hover:border-blue-400 hover:shadow-md transition-all active:scale-95 group shadow-sm">
-               <Clock className="w-4 h-4 text-blue-600 group-hover:-rotate-12 transition-transform" />
-               <span className="text-xs font-bold text-gray-700">History</span>
+            <button onClick={() => setActiveModal('history')} className="flex flex-1 items-center justify-center gap-1.5 bg-white border border-gray-100 px-2 py-2 rounded-lg hover:border-blue-400 transition-all active:scale-95 group">
+               <Clock className="w-3.5 h-3.5 text-blue-600" />
+               <span className="text-[10px] font-bold text-gray-700">History</span>
             </button>
-            <button onClick={() => setActiveModal('reports')} className="flex flex-1 items-center justify-center gap-2 bg-white border border-gray-100 px-3 py-3 rounded-xl hover:border-emerald-400 hover:shadow-md transition-all active:scale-95 group shadow-sm">
-               <FileText className="w-4 h-4 text-emerald-600 group-hover:-rotate-12 transition-transform" />
-               <span className="text-xs font-bold text-gray-700">Reports</span>
+            <button onClick={() => setActiveModal('reports')} className="flex flex-1 items-center justify-center gap-1.5 bg-white border border-gray-100 px-2 py-2 rounded-lg hover:border-emerald-400 transition-all active:scale-95 group">
+               <FileText className="w-3.5 h-3.5 text-emerald-600" />
+               <span className="text-[10px] font-bold text-gray-700">Reports</span>
             </button>
-            <button onClick={() => setActiveModal('params')} className="flex flex-1 items-center justify-center gap-2 bg-white border border-gray-100 px-3 py-3 rounded-xl hover:border-rose-400 hover:shadow-md transition-all active:scale-95 group shadow-sm">
-               <Activity className="w-4 h-4 text-rose-500 group-hover:-rotate-12 transition-transform" />
-               <span className="text-xs font-bold text-gray-700">Params</span>
+            <button onClick={() => setActiveModal('params')} className="flex flex-1 items-center justify-center gap-1.5 bg-white border border-gray-100 px-2 py-2 rounded-lg hover:border-rose-400 transition-all active:scale-95 group">
+               <Activity className="w-3.5 h-3.5 text-rose-500" />
+               <span className="text-[10px] font-bold text-gray-700">Params</span>
             </button>
          </div>
 

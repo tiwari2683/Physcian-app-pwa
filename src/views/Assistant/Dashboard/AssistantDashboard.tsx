@@ -20,6 +20,8 @@ const AssistantDashboard = () => {
     // Remote Data - Using namespaced assistant slices
     const { patients, waitingRoom, isLoading: loadingPatients } = useAppSelector((state) => state.asstPatients);
     const { appointments, isLoading: loadingAppointments } = useAppSelector((state) => state.asstAppointments);
+    const { user } = useAppSelector((state) => state.auth);
+    const role = user?.role || 'Assistant';
 
     // Local Data
     const [localDrafts, setLocalDrafts] = useState<DraftPatient[]>([]);
@@ -144,54 +146,86 @@ const AssistantDashboard = () => {
             className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 md:space-y-8"
         >
             {/* Header */}
-            <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-1">
                 <div>
                     <h1 className="text-xl md:text-2xl lg:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
-                        Assistant Dashboard
+                        {role === 'Doctor' ? 'Doctor' : 'Assistant'} Dashboard
                     </h1>
-                    <p className="text-type-body flex items-center gap-2 mt-1">
+                    <p className="text-type-body flex items-center gap-2 mt-1 decoration-transparent">
                         <Clock size={16} className="text-primary-base" />
-                        Welcome back. Here's your overview for today.
+                        Live Status
                     </p>
                 </div>
-                <button
-                    onClick={handleNewVisit}
-                    className="btn-primary w-full md:w-auto overflow-hidden group relative"
-                >
-                    <div className="absolute inset-0 bg-white/10 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
-                    <FilePlus size={20} />
-                    <span>New Patient Visit</span>
-                </button>
             </motion.div>
 
-            {/* Metrics Grid */}
-            <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                {[
-                    { label: 'Total Registered', value: patients.length, loading: loadingPatients, icon: Users, color: 'primary', gradient: 'from-blue-500 to-indigo-600' },
-                    { label: 'In Waiting Room', value: waitingRoomPatients.length, loading: loadingPatients, icon: Activity, color: 'amber', gradient: 'from-amber-400 to-orange-500', pulse: true },
-                    { label: 'Today\'s Appointments', value: todayAppointments.length, loading: loadingAppointments, icon: Calendar, color: 'secondary', gradient: 'from-emerald-400 to-teal-500' }
-                ].map((metric, idx) => (
-                    <motion.div 
-                        key={idx}
-                        whileHover={{ y: -5 }}
-                        className="glass-card p-4 md:p-5 flex items-center gap-4 group relative overflow-hidden"
-                    >
-                        <div className={`p-3 rounded-xl bg-gradient-to-br ${metric.gradient} text-white shadow-lg shadow-${metric.color}-500/20`}>
-                            <metric.icon size={22} className={metric.pulse ? 'animate-pulse' : ''} />
+            {/* 📊 System Stats Section */}
+            <motion.div variants={itemVariants} className="px-1">
+                <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2.5">📊 System Stats</h2>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* Waiting Room - Priority Card (Full Width on mobile) */}
+                    <div className="col-span-2 lg:col-span-1 bg-amber-500 p-4 rounded-2xl shadow-lg shadow-amber-200/50 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-98">
+                        <div className="p-2.5 bg-white/20 text-white rounded-xl shrink-0 backdrop-blur-sm">
+                            <Activity size={24} className="animate-pulse" />
                         </div>
-                        <div>
-                            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{metric.label}</p>
-                            <p className="text-2xl font-bold text-type-heading mt-0.5">
-                                {metric.loading ? (
-                                    <span className="flex gap-1">
-                                        <span className="w-1.5 h-6 bg-slate-200 animate-pulse rounded"></span>
-                                        <span className="w-1.5 h-6 bg-slate-200 animate-pulse rounded delay-75"></span>
-                                    </span>
-                                ) : metric.value}
-                            </p>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-amber-100/80 truncate">In Waiting Room</p>
+                            <div className="flex items-baseline gap-2">
+                                <p className="text-2xl font-black text-white leading-none mt-1">{waitingRoomPatients.length}</p>
+                                <span className="flex h-2 w-2 relative">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                                </span>
+                            </div>
                         </div>
-                    </motion.div>
-                ))}
+                    </div>
+
+                    {/* Total Registered */}
+                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 transition-all hover:shadow-md active:scale-98">
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-xl shrink-0">
+                            <Users size={20} />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Patients</p>
+                            <p className="text-lg font-black text-slate-900 leading-none mt-1">{patients.length}</p>
+                        </div>
+                    </div>
+
+                    {/* Today's Appointments */}
+                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 transition-all hover:shadow-md active:scale-98">
+                        <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+                            <Calendar size={20} />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Schedule</p>
+                            <p className="text-lg font-black text-slate-900 leading-none mt-1">{todayAppointments.length}</p>
+                        </div>
+                    </div>
+                </div>
+            </motion.div>
+
+            {/* ⚡ Quick Actions Section */}
+            <motion.div variants={itemVariants} className="px-1">
+                <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2.5">⚡ Quick Actions</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                        { label: 'New Visit', onClick: handleNewVisit, icon: FilePlus, color: 'blue', grad: 'from-blue-500/10 to-indigo-500/10' },
+                        { label: 'Register', onClick: () => navigate('/assistant/patients'), icon: Users, color: 'amber', grad: 'from-amber-500/10 to-orange-500/10' },
+                        { label: 'Schedule', onClick: () => navigate('/assistant/appointments'), icon: Calendar, color: 'emerald', grad: 'from-emerald-500/10 to-teal-500/10' },
+                        { label: 'Settings', onClick: () => navigate('/assistant/settings'), icon: ShieldCheck, color: 'slate', grad: 'from-slate-500/10 to-slate-800/10' }
+                    ].map((item, idx) => (
+                        <button
+                            key={idx}
+                            onClick={item.onClick}
+                            className="group relative overflow-hidden p-3.5 bg-white border border-slate-100 rounded-2xl shadow-sm transition-all hover:shadow-md active:scale-95 flex flex-col items-start gap-2.5"
+                        >
+                            <div className={`absolute inset-0 bg-gradient-to-br ${item.grad} opacity-0 group-hover:opacity-100 transition-opacity`} />
+                            <div className={`p-2 bg-${item.color}-50 text-${item.color}-600 rounded-xl group-hover:scale-110 transition-transform duration-200 shrink-0`}>
+                                <item.icon size={18} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-800 tracking-tight">{item.label}</span>
+                        </button>
+                    ))}
+                </div>
             </motion.div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">

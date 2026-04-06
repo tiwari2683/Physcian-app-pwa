@@ -88,62 +88,75 @@ export const DashboardScreen = () => {
         )}
       </div>
       
-      {/* ── Metrics Grid (Reduced Height) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Waiting Room - Live */}
-        <div className="bg-white/60 backdrop-blur-md p-3 rounded-xl shadow-sm border border-white/40 flex items-center gap-3 transition-all hover:shadow-md">
-          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg shrink-0">
-            <Clock className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">Waiting Room</p>
-            <p className="text-lg font-bold text-slate-900 leading-none mt-0.5">{waitingRoom.length}</p>
-          </div>
-        </div>
 
-        {/* Total Patients - Live */}
-        <div className="bg-white/60 backdrop-blur-md p-3 rounded-xl shadow-sm border border-white/40 flex items-center gap-3 transition-all hover:shadow-md">
-          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg shrink-0">
-            <Users className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">Total Patients</p>
-            <p className="text-lg font-bold text-slate-900 leading-none mt-0.5">{patients.length || '...'}</p>
-          </div>
-        </div>
+      {/* 📊 System Stats Section */}
+      <div className="px-1">
 
-        {/* Today's Appointments - Live */}
-        <div className="bg-white/60 backdrop-blur-md p-3 rounded-xl shadow-sm border border-white/40 flex items-center gap-3 transition-all hover:shadow-md">
-          <div className="p-2 bg-amber-50 text-amber-600 rounded-lg shrink-0">
-            <Calendar className="w-5 h-5" />
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* Waiting Room - Priority Card (Full Width on mobile) */}
+          <div className="col-span-2 md:col-span-1 bg-indigo-600 p-4 rounded-2xl shadow-lg shadow-indigo-200/50 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-98">
+            <div className="p-2.5 bg-white/20 text-white rounded-xl shrink-0 backdrop-blur-sm">
+              <Clock className="w-6 h-6" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-100/80 truncate">Waiting Room</p>
+              <div className="flex items-baseline gap-2">
+                <p className="text-2xl font-black text-white leading-none mt-1">{waitingRoom.length}</p>
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">Appointments</p>
-            <p className="text-lg font-bold text-slate-900 leading-none mt-0.5">{todaysAppointmentsCount}</p>
+
+          {/* Total Patients */}
+          <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 transition-all hover:shadow-md active:scale-98">
+            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Patients</p>
+              <p className="text-lg font-black text-slate-900 leading-none mt-1">{patients.length || '...'}</p>
+            </div>
+          </div>
+
+          {/* Today's Appointments */}
+          <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 transition-all hover:shadow-md active:scale-98">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl shrink-0">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Today</p>
+              <p className="text-lg font-black text-slate-900 leading-none mt-1">{todaysAppointmentsCount}</p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Action Buttons (Horizontal Flow, Compact) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        {[
-          { label: 'New Patient', path: '/doctor/visit/new', icon: Users, color: 'blue', grad: 'from-blue-500/5 to-indigo-500/5' },
-          { label: 'Appointments', path: '/doctor/appointments', icon: Calendar, color: 'amber', grad: 'from-amber-500/5 to-orange-500/5' },
-          { label: 'Messages', path: '/doctor/prescriptions', icon: Activity, color: 'teal', grad: 'from-teal-500/5 to-emerald-500/5' },
-          { label: 'Payments', path: '/doctor/settings', icon: RefreshCw, color: 'slate', grad: 'from-slate-500/5 to-slate-800/5' }
-        ].map((item, idx) => (
-          <button
-            key={idx}
-            onClick={() => navigate(item.path)}
-            className="group relative overflow-hidden p-2.5 bg-white/40 backdrop-blur-md border border-white/60 rounded-xl shadow-sm transition-all hover:shadow-md flex items-center gap-3 active:scale-98"
-          >
-            <div className={`absolute inset-0 bg-gradient-to-br ${item.grad} opacity-0 group-hover:opacity-100 transition-opacity`} />
-            <div className={`p-2 bg-${item.color}-50 text-${item.color}-600 rounded-lg group-hover:scale-105 transition-transform duration-200 shrink-0`}>
-              <item.icon className="w-4 h-4" />
-            </div>
-            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-tight truncate">{item.label}</span>
-          </button>
-        ))}
+      {/* ⚡ Quick Actions Section */}
+      <div className="px-1">
+        <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2.5">⚡ Quick Actions</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-4">
+          {[
+            { label: 'New Patient', path: '/doctor/visit/new', icon: Users, color: 'blue', grad: 'from-blue-500/10 to-indigo-500/10' },
+            { label: 'Schedule', path: '/doctor/appointments', icon: Calendar, color: 'amber', grad: 'from-amber-500/10 to-orange-500/10' },
+            { label: 'Messages', path: '/doctor/prescriptions', icon: Activity, color: 'teal', grad: 'from-teal-500/10 to-emerald-500/10' },
+            { label: 'Settings', path: '/doctor/settings', icon: RefreshCw, color: 'slate', grad: 'from-slate-500/10 to-slate-800/10' }
+          ].map((item, idx) => (
+            <button
+              key={idx}
+              onClick={() => navigate(item.path)}
+              className="group relative overflow-hidden p-3 bg-white border border-slate-100 rounded-2xl shadow-sm transition-all hover:shadow-md active:scale-95 flex flex-col items-start gap-2.5"
+            >
+              <div className={`absolute inset-0 bg-gradient-to-br ${item.grad} opacity-0 group-hover:opacity-100 transition-opacity`} />
+              <div className={`p-2 bg-${item.color}-50 text-${item.color}-600 rounded-xl group-hover:scale-110 transition-transform duration-200 shrink-0`}>
+                <item.icon className="w-5 h-5" />
+              </div>
+              <span className="text-xs font-bold text-slate-800 tracking-tight">{item.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════

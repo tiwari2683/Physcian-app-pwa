@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
-export const generateAndSharePrescription = async (htmlContent: string) => {
+export const generateAndSharePrescription = async (htmlContent: string, mode: 'share' | 'download' | 'view' = 'share') => {
   try {
     // 1. Create a hidden container to render HTML
     const container = document.createElement('div');
@@ -53,8 +53,29 @@ export const generateAndSharePrescription = async (htmlContent: string) => {
     }
     
     
-    // 4. Get Blob and Share / Download
+    // 4. Get Blob and Output
     const blob = pdf.output('blob');
+    const url = URL.createObjectURL(blob);
+    
+    if (mode === 'view') {
+      window.open(url, '_blank');
+      // Cleanup locally after open attempt
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return;
+    }
+
+    if (mode === 'download') {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Prescription_${Date.now()}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 100);
+      return;
+    }
     
     // Native Web Share API
     if (navigator.share && navigator.canShare) {
@@ -72,27 +93,24 @@ export const generateAndSharePrescription = async (htmlContent: string) => {
         } catch (shareErr: any) {
           if (shareErr.name === 'NotAllowedError') {
             console.warn("Web Share API gesture timeout triggered. Falling back to native download protocol...");
-            // Let it naturally drop through to the fallback download code below
+            // Let it naturally drop through
           } else if (shareErr.name !== 'AbortError') {
-             // AbortError is just the user cancelling the share sheet, ignore it
              console.error("Non-critical share error:", shareErr);
              return;
           } else {
-             return; // User aborted share sheet natively
+             return; // User aborted
           }
         }
       }
     }
 
-    // Fallback: Trigger standard browser download
-    const url = URL.createObjectURL(blob);
+    // Fallback if not supported or share error
     const link = document.createElement('a');
     link.href = url;
     link.download = `Prescription_${Date.now()}.pdf`;
     document.body.appendChild(link);
     link.click();
     
-    // Cleanup
     setTimeout(() => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
