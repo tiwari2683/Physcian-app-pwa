@@ -12,7 +12,8 @@ import {
     Calendar,
     UserPlus,
     History,
-    ArrowUpRight
+    ArrowUpRight,
+    Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import '../Assistant.css';
@@ -240,8 +241,21 @@ const AssistantPatientsDirectory: React.FC = () => {
  
                                     <div className="flex flex-row lg:flex-col items-center gap-2 shrink-0 w-full lg:w-auto justify-end border-t lg:border-t-0 border-borderColor/30 pt-4 lg:pt-0">
                                         <button
-                                            onClick={() => navigate(`/assistant/visit/${patient.patientId}`)}
-                                            className="w-full lg:w-auto px-10 py-2.5 rounded-xl transition-all active:scale-95 btn-primary text-xs whitespace-nowrap"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                navigate(`/assistant/patients/${patient.patientId}`);
+                                            }}
+                                            className="flex-1 lg:w-full flex items-center justify-center gap-2 px-6 py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-xl font-bold transition-colors text-xs whitespace-nowrap"
+                                        >
+                                            <Eye className="w-4 h-4" />
+                                            View Profile
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                navigate(`/assistant/visit/${patient.patientId}`);
+                                            }}
+                                            className="flex-1 lg:w-full px-6 py-2.5 rounded-xl transition-all active:scale-95 btn-primary text-xs whitespace-nowrap"
                                         >
                                             Add Vitals
                                         </button>

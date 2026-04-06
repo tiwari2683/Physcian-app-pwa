@@ -6,7 +6,7 @@ import { generateAndSharePrescription } from '../../../utils/PdfGenerator';
 import { ArrowLeft, Share2, Download, AlertCircle, RefreshCw, FileText, Calendar, Clock, Pill, User, Eye, Phone, MapPin, Activity, Stethoscope, CheckCircle, FileScan, Image as ImageIcon, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export default function PatientFullProfile() {
+export const PatientProfileScreen = () => {
     const { patientId } = useParams<{ patientId: string }>();
     const navigate = useNavigate();
 
@@ -131,7 +131,7 @@ export default function PatientFullProfile() {
                 {/* Back Button */}
                 <div>
                     <button 
-                        onClick={() => navigate('/assistant/patients')}
+                        onClick={() => navigate('/doctor/patients')}
                         className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors font-bold text-sm pl-1"
                     >
                         <ArrowLeft className="w-4 h-4" /> Back to Patient Directory

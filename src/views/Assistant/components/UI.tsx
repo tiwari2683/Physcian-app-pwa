@@ -61,7 +61,7 @@ export const Card: React.FC<{ children: React.ReactNode; title?: string; classNa
     className = ''
 }) => {
     return (
-        <div className={`panel-card ${className}`}>
+        <div className={`panel-card p-6 md:p-8 lg:p-10 ${className}`}>
             {title && <h3 className="text-lg font-bold mb-4 border-b pb-2">{title}</h3>}
             {children}
         </div>

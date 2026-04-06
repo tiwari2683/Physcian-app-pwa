@@ -158,9 +158,7 @@ const AssistantDashboard = () => {
                 </div>
             </motion.div>
 
-            {/* 📊 System Stats Section */}
-            <motion.div variants={itemVariants} className="px-1">
-                <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2.5">📊 System Stats</h2>
+            <motion.div variants={itemVariants} className="px-1 mt-6">
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     {/* Waiting Room - Priority Card (Full Width on mobile) */}
                     <div className="col-span-2 lg:col-span-1 bg-amber-500 p-4 rounded-2xl shadow-lg shadow-amber-200/50 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-98">
@@ -185,7 +183,7 @@ const AssistantDashboard = () => {
                             <Users size={20} />
                         </div>
                         <div className="min-w-0">
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Patients</p>
+                            <p className="text-[10px] font-bold uppercase tracking-tight text-slate-400">Patients</p>
                             <p className="text-lg font-black text-slate-900 leading-none mt-1">{patients.length}</p>
                         </div>
                     </div>
@@ -196,7 +194,7 @@ const AssistantDashboard = () => {
                             <Calendar size={20} />
                         </div>
                         <div className="min-w-0">
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Schedule</p>
+                            <p className="text-[10px] font-bold uppercase tracking-tight text-slate-400">Schedule</p>
                             <p className="text-lg font-black text-slate-900 leading-none mt-1">{todayAppointments.length}</p>
                         </div>
                     </div>

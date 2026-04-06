@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Search, UserPlus, FileText } from 'lucide-react';
+import { Search, UserPlus, FileText, Eye } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks';
 import { fetchPatients } from '../../../controllers/slices/patientSlice';
 
@@ -99,21 +99,32 @@ export const PatientDirectory = () => {
                 </div>
 
                 {/* Section 8 — Full-blue button in certificate mode */}
-                <button 
-                  onClick={() => navigate(
-                    isCertificateMode
-                      ? `/doctor/fitness-certificate/${patient.patientId}`
-                      : `/doctor/visit/new/${patient.patientId}`
-                  )}
-                  className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
-                    isCertificateMode
-                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-100'
-                      : 'bg-white text-blue-600 border border-gray-200 hover:bg-gray-50 hover:border-blue-200'
-                  }`}
-                >
-                  <FileText className="w-4 h-4" />
-                  {isCertificateMode ? 'Issue Fitness Certificate' : 'Start Consultation / Visit'}
-                </button>
+                {isCertificateMode ? (
+                  <button 
+                    onClick={() => navigate(`/doctor/fitness-certificate/${patient.patientId}`)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-100"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Issue Fitness Certificate
+                  </button>
+                ) : (
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => navigate(`/doctor/patients/${patient.patientId}`)}
+                      className="flex-[0.8] flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm"
+                    >
+                      <Eye className="w-4 h-4" />
+                      View
+                    </button>
+                    <button 
+                      onClick={() => navigate(`/doctor/visit/new/${patient.patientId}`)}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all bg-white text-blue-600 border border-gray-200 hover:bg-blue-50 hover:border-blue-200 shadow-sm"
+                    >
+                      <FileText className="w-4 h-4" />
+                      Start Visit
+                    </button>
+                  </div>
+                )}
               </div>
             ))
           )}

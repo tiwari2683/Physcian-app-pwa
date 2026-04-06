@@ -99,7 +99,7 @@ export const DashboardScreen = () => {
               <Clock className="w-6 h-6" />
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-100/80 truncate">Waiting Room</p>
+              <p className="text-[10px] font-bold uppercase tracking-tight text-indigo-100/80">Waiting Room</p>
               <div className="flex items-baseline gap-2">
                 <p className="text-2xl font-black text-white leading-none mt-1">{waitingRoom.length}</p>
                 <span className="flex h-2 w-2 relative">
@@ -116,7 +116,7 @@ export const DashboardScreen = () => {
               <Users className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Patients</p>
+              <p className="text-[10px] font-bold uppercase tracking-tight text-slate-400">Patients</p>
               <p className="text-lg font-black text-slate-900 leading-none mt-1">{patients.length || '...'}</p>
             </div>
           </div>
@@ -127,7 +127,7 @@ export const DashboardScreen = () => {
               <Calendar className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">Today</p>
+              <p className="text-[10px] font-bold uppercase tracking-tight text-slate-400">Today</p>
               <p className="text-lg font-black text-slate-900 leading-none mt-1">{todaysAppointmentsCount}</p>
             </div>
           </div>

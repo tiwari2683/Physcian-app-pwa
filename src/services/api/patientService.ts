@@ -158,5 +158,14 @@ export const patientService = {
     });
     const parsed = parseResponse(response.data);
     return parsed || [];
+  },
+
+  getAllPatientVisits: async (patientId: string): Promise<any[]> => {
+    const response = await apiClient.post('/patient-data', {
+      action: 'getAllPatientVisits',
+      patientId
+    });
+    const parsed = parseResponse(response.data);
+    return parsed || [];
   }
 };
