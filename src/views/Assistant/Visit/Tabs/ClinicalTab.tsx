@@ -6,6 +6,9 @@ import { usePendingFiles } from '../../../../contexts/PendingFilesContext';
 import * as UploadService from '../../../../services/uploadService';
 import { Camera, FileUp, FileText, History as HistoryIcon, Table, X, MoreHorizontal, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import { generateUUID } from '../../../../utils/uuid';
+import { ViewUploadedFilesPanel } from '../../../../components/Common/ViewUploadedFilesPanel';
+import { ImageZoomModal } from '../../../../components/Common/ImageZoomModal';
+import type { LocalReportFile } from '../../../../services/uploadService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vitals field schema — single source of truth for both Grid and Compare views
@@ -179,6 +182,19 @@ export const ClinicalTab: React.FC = () => {
     );
 
     const [isCompareMode, setIsCompareMode] = useState(false);
+    const [isReportPanelOpen, setIsReportPanelOpen] = useState(false);
+    const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
+
+    // Map Redux reports → LocalReportFile shape expected by ViewUploadedFilesPanel
+    const localFilesForPanel: LocalReportFile[] = clinical.reports.map(r => ({
+        id: r.fileId || r.fileName,
+        name: r.fileName,
+        size: r.fileSize ? `${(r.fileSize / 1024 / 1024).toFixed(2)} MB` : '0 MB',
+        type: (r.fileType?.startsWith('image/') ? 'image' : 'document') as 'image' | 'document',
+        previewUri: r.isPending ? (r.fileUrl || null) : null,
+        s3Key: r.s3Key,
+        uploadedToS3: r.isPending ? undefined : true,
+    }));
 
     const handleViewReport = async (report: any) => {
         if (report.fileUrl) {
@@ -451,15 +467,24 @@ export const ClinicalTab: React.FC = () => {
                                                     View
                                                 </Button>
                                             )}
-                                            {/* Remove is always available */}
-                                            <button
-                                                onClick={() => handleRemoveReport(idx)}
-                                                disabled={isVisitLocked}
-                                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                title="Remove file"
-                                            >
-                                                <Trash2 size={15} />
-                                            </button>
+                                            {/* Delete only allowed for locally-staged (pending) files — uploaded files are immutable */}
+                                            {report.isPending ? (
+                                                <button
+                                                    onClick={() => handleRemoveReport(idx)}
+                                                    disabled={isVisitLocked}
+                                                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                                    title="Remove staged file"
+                                                >
+                                                    <Trash2 size={15} />
+                                                </button>
+                                            ) : (
+                                                <span
+                                                    className="p-1.5 text-gray-200 cursor-not-allowed"
+                                                    title="Uploaded reports cannot be deleted from here"
+                                                >
+                                                    <Trash2 size={15} />
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -467,6 +492,18 @@ export const ClinicalTab: React.FC = () => {
                         </div>
                     </div>
                 )}
+
+                {/* ── "View Past Reports" button ──────────────────────── */}
+                <button
+                    type="button"
+                    onClick={() => setIsReportPanelOpen(true)}
+                    className="mt-3 w-full flex items-center justify-center gap-2 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-sm transition-colors"
+                >
+                    <div className="p-1 bg-indigo-700 text-white rounded">
+                        <FileText size={12} />
+                    </div>
+                    View Past &amp; Uploaded Reports
+                </button>
 
                 <div className="mt-4">
                     <div className="flex justify-between items-center mb-1">
@@ -489,6 +526,22 @@ export const ClinicalTab: React.FC = () => {
                 </div>
 
             </Card>
+
+            {/* ── Past / Current Visit Reports Panel ──────────────────── */}
+            <ViewUploadedFilesPanel
+                isOpen={isReportPanelOpen}
+                onClose={() => setIsReportPanelOpen(false)}
+                patientId={effectiveId || undefined}
+                localFiles={localFilesForPanel}
+                onZoomImage={url => setZoomedImageUrl(url)}
+            />
+
+            {/* ── Image Zoom Viewer ────────────────────────────────────── */}
+            <ImageZoomModal
+                imageUrl={zoomedImageUrl}
+                onClose={() => setZoomedImageUrl(null)}
+            />
+
         </div>
     );
 };

@@ -165,17 +165,34 @@ export const asstPatientVisitSlice = createSlice({
             state.diagnosisHistory = action.payload.diagnosisHistory;
             state.investigationsHistory = action.payload.investigationsHistory;
 
-            state.basic = { ...state.basic, ...action.payload.patientData };
+            // Merge basic info carefully: only update if missing or if the server has something we don't
+            if (action.payload.patientData) {
+                const updatedBasic = { ...state.basic };
+                (Object.keys(action.payload.patientData) as (keyof PatientBasic)[]).forEach(key => {
+                    if (!updatedBasic[key] && action.payload.patientData[key]) {
+                        (updatedBasic as any)[key] = action.payload.patientData[key];
+                    }
+                });
+                state.basic = updatedBasic;
+            }
 
             if (action.payload.activeVisit && !state.visitId) {
                 const av = action.payload.activeVisit;
                 state.visitId = av.visitId;
                 state.visitStatus = av.status || 'WAITING';
-                if (av.clinicalParameters) state.clinical.vitals = av.clinicalParameters;
-                if (av.medicalHistory) state.clinical.historyText = av.medicalHistory;
-                if (av.diagnosis) state.diagnosis.diagnosisText = av.diagnosis;
                 
-                if (av.advisedInvestigations) {
+                // Only populate vitals, history, diagnosis if they are currently blank
+                if (av.clinicalParameters && Object.keys(state.clinical.vitals).length === 0) {
+                    state.clinical.vitals = av.clinicalParameters;
+                }
+                if (av.medicalHistory && !state.clinical.historyText) {
+                    state.clinical.historyText = av.medicalHistory;
+                }
+                if (av.diagnosis && !state.diagnosis.diagnosisText) {
+                    state.diagnosis.diagnosisText = av.diagnosis;
+                }
+                
+                if (av.advisedInvestigations && state.diagnosis.selectedInvestigations.length === 0) {
                     const rawAdv = av.advisedInvestigations;
                     if (typeof rawAdv === 'string' && rawAdv.trim() !== '') {
                         if (rawAdv.trim().startsWith('[')) {
@@ -191,8 +208,12 @@ export const asstPatientVisitSlice = createSlice({
                     }
                 }
 
-                if (av.medications) state.prescription.medications = av.medications;
-                if (av.reportFiles) state.clinical.reports = av.reportFiles;
+                if (av.medications && state.prescription.medications.length === 0) {
+                    state.prescription.medications = av.medications;
+                }
+                if (av.reportFiles && state.clinical.reports.length === 0) {
+                    state.clinical.reports = av.reportFiles;
+                }
             }
 
             const lockDate = action.payload.lastLockedVisitDate || (action.payload.activeVisit?.status === 'COMPLETED' ? action.payload.activeVisit.updatedAt : null);

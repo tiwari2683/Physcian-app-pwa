@@ -135,10 +135,10 @@ const AssistantVisitWizard: React.FC = () => {
     useEffect(() => {
         if (!isInitialized.current) return;
         const currentId = id || draftId || patientId;
-        if (!isLocalDraftId(currentId) || isVisitLocked || isSubmitting) return;
+        if (isVisitLocked || isSubmitting) return;
 
-        const hasRequiredBasicInfo = !!(basic?.fullName?.trim() && basic?.mobileNumber?.trim());
-        if (!hasRequiredBasicInfo) return;
+        const hasName = !!basic?.fullName?.trim();
+        if (!hasName) return;
 
         if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
         localSaveTimerRef.current = setTimeout(() => {

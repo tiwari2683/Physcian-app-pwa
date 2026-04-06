@@ -304,7 +304,9 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
                  const renderFileList = (files: S3FileRow[]) => (
                    <div className="space-y-2">
                      {files.map((file, idx) => {
-                       const isLocked = file.visitId === currentVisitId ? isVisitLocked : true; // Past reports always locked
+                       const isPastVisitFile = !currentVisitId || file.visitId !== currentVisitId;
+                       // Delete only for files from the current active (non-completed) visit
+                       const canDelete = !isPastVisitFile && !isVisitLocked;
                        return (
                          <FileCard
                            key={`s3-${file.s3Key}-${idx}`}
@@ -335,16 +337,25 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
                                    <ExternalLink className="w-3.5 h-3.5" /> Open
                                  </button>
                                )}
-                               <button
-                                 onClick={() => handleRemoveFile(file)}
-                                 disabled={removingKey === file.s3Key || isLocked}
-                                 className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-40"
-                                 title={isLocked ? "Cannot delete reports from completed or past visits." : "Remove file"}
-                               >
-                                 {removingKey === file.s3Key
-                                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                   : <Trash2 className="w-3.5 h-3.5" />}
-                               </button>
+                               {isPastVisitFile ? (
+                                 <span
+                                   className="flex items-center gap-1 px-2 py-1 bg-gray-50 text-gray-400 rounded-lg text-[10px] font-bold border border-gray-100 cursor-default select-none"
+                                   title="Reports from past visits are read-only"
+                                 >
+                                   🔒 Past visit
+                                 </span>
+                               ) : (
+                                 <button
+                                   onClick={() => handleRemoveFile(file)}
+                                   disabled={removingKey === file.s3Key || !canDelete}
+                                   className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                   title={isVisitLocked ? "Visit is completed — reports are now locked" : "Remove file"}
+                                 >
+                                   {removingKey === file.s3Key
+                                     ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                     : <Trash2 className="w-3.5 h-3.5" />}
+                                 </button>
+                               )}
                              </div>
                            }
                          />
