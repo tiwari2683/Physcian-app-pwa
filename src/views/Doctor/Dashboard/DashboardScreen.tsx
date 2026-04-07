@@ -80,7 +80,7 @@ export const DashboardScreen = () => {
   return (
     <div className="p-3 lg:p-6 space-y-3 lg:space-y-4 max-w-7xl mx-auto">
       <div className="flex items-center justify-between px-1">
-        <h1 className="text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">Dashboard</h1>
+        <h1 className="text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">Doctor's Dashboard</h1>
         {loadingWaitingRoom && !waitingRoom.length && (
           <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5 animate-pulse">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching Live Queue...

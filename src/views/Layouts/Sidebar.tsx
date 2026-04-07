@@ -22,7 +22,7 @@ export const Sidebar = ({
 
   // Doctor-specific links
   const doctorNavItems = [
-    { name: 'Dashboard', path: `${rolePath}/dashboard`, icon: LayoutDashboard },
+    { name: "Doctor's Dashboard", path: `${rolePath}/dashboard`, icon: LayoutDashboard },
     { name: 'Patients', path: `${rolePath}/patients`, icon: Users },
     { name: 'Appointments', path: `${rolePath}/appointments`, icon: CalendarDays },
     { name: 'Fitness Certificate', path: `${rolePath}/fitness-certificate`, icon: FileText },

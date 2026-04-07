@@ -149,7 +149,7 @@ const AssistantDashboard = () => {
             <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-1">
                 <div>
                     <h1 className="text-xl md:text-2xl lg:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
-                        {role === 'Doctor' ? 'Doctor' : 'Assistant'} Dashboard
+                        {role === 'Doctor' ? "Doctor's Dashboard" : "Assistant Dashboard"}
                     </h1>
                     <p className="text-type-body flex items-center gap-2 mt-1 decoration-transparent">
                         <Clock size={16} className="text-primary-base" />
