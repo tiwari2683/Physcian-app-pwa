@@ -78,33 +78,43 @@ export const generateAndSharePrescription = async (htmlContent: string, mode: 's
     }
     
     // Native Web Share API
-    if (navigator.share && navigator.canShare) {
-      const file = new File([blob], 'prescription.pdf', { type: 'application/pdf' });
-      const shareData = {
-        title: 'Share Prescription',
-        text: 'Patient Prescription Document',
+    if (navigator.share) {
+      const file = new File([blob], `Prescription_${Date.now()}.pdf`, { type: 'application/pdf' });
+      const shareData: ShareData = {
+        title: 'Patient Prescription',
+        text: 'Sharing a medical prescription document.',
         files: [file]
       };
       
-      if (navigator.canShare(shareData)) {
+      // Check if file sharing is specifically supported
+      const canShareFiles = navigator.canShare && navigator.canShare(shareData);
+
+      if (canShareFiles) {
         try {
           await navigator.share(shareData);
           return;
         } catch (shareErr: any) {
-          if (shareErr.name === 'NotAllowedError') {
-            console.warn("Web Share API gesture timeout triggered. Falling back to native download protocol...");
-            // Let it naturally drop through
-          } else if (shareErr.name !== 'AbortError') {
-             console.error("Non-critical share error:", shareErr);
-             return;
-          } else {
-             return; // User aborted
+          if (shareErr.name === 'AbortError') {
+            console.log("User cancelled sharing");
+            return;
           }
+          console.error("Web Share API error:", shareErr);
+          // Only fall through if it's a technical error, not a user cancellation
         }
+      } else {
+        console.warn("This browser supports sharing but not file sharing specifically.");
+        // We could provide a toast here later if needed
       }
     }
 
-    // Fallback if not supported or share error
+    // FINAL FALLBACK: If mode is 'share' and we reached here, it means sharing failed/unsupported.
+    // We should NOT download automatically if the user specifically clicked 'Share'.
+    if (mode === 'share') {
+      alert("Sharing files is not supported on this browser/device. Please use the Download button instead.");
+      return;
+    }
+
+    // Default fallback for other modes (though download has its own block above)
     const link = document.createElement('a');
     link.href = url;
     link.download = `Prescription_${Date.now()}.pdf`;

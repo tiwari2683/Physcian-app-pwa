@@ -9,6 +9,7 @@ import { FitnessCertificateForm } from '../views/Doctor/FitnessCertificate/Fitne
 import { FitnessCertificateHistory } from '../views/Doctor/FitnessCertificate/FitnessCertificateHistory';
 import { SettingsScreen } from '../views/Doctor/Settings/SettingsScreen';
 import { PrescriptionsList } from '../views/Doctor/Prescriptions/PrescriptionsList';
+import { PrescriptionHistory } from '../views/Doctor/Prescriptions/PrescriptionHistory';
 import { PatientProfileScreen } from '../views/Doctor/Patients/PatientProfileScreen';
 import { useRef } from 'react';
 
@@ -37,6 +38,7 @@ export default function DoctorRoutes() {
 
         {/* Prescriptions Routes */}
         <Route path="prescriptions" element={<PrescriptionsList />} />
+        <Route path="prescriptions/:patientId" element={<PrescriptionHistory />} />
         <Route path="patients/:patientId" element={<PatientProfileScreen />} />
 
         {/* New patient flow */}

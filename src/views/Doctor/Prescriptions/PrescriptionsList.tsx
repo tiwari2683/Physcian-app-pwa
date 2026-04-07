@@ -169,7 +169,7 @@ export const PrescriptionsList = () => {
                             </div>
 
                             <button 
-                                onClick={() => navigate(patient.patientId)}
+                                onClick={() => navigate(`/doctor/prescriptions/${patient.patientId}`)}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100"
                             >
                                 <FileText className="w-4 h-4" />
