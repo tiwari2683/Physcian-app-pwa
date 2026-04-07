@@ -1,179 +1,158 @@
-// src/services/auth/authService.ts
-import { AuthenticationDetails, CognitoUser } from 'amazon-cognito-identity-js';
-import { userPool } from './cognitoConfig';
-
-// Module-level reference to the CognitoUser pending a NEW_PASSWORD_REQUIRED challenge.
-// Stored here (not in React state) so it survives navigation between screens.
-let _pendingCognitoUser: CognitoUser | null = null;
+import { 
+  signIn, 
+  signOut, 
+  fetchAuthSession, 
+  fetchUserAttributes, 
+  confirmSignIn,
+  resetPassword,
+  confirmResetPassword,
+  updatePassword
+} from 'aws-amplify/auth';
+import type { User } from '../../models';
 
 // Discriminated union: a login can result in a valid token OR a "must change password" challenge
 export type LoginResult =
-  | { type: 'SUCCESS'; token: string }
+  | { type: 'SUCCESS'; user: User }
   | { type: 'NEW_PASSWORD_REQUIRED' };
 
 export const authService = {
-  login: (email: string, password: string): Promise<LoginResult> => {
-    return new Promise((resolve, reject) => {
-      const authenticationDetails = new AuthenticationDetails({
-        Username: email,
-        Password: password,
-      });
-
-      const cognitoUser = new CognitoUser({
-        Username: email,
-        Pool: userPool,
-      });
-
-      cognitoUser.authenticateUser(authenticationDetails, {
-        onSuccess: (result) => {
-          const idToken = result.getIdToken();
-          const tokenStr = idToken.getJwtToken();
-          const payload = idToken.decodePayload();
-
-          const role = payload['custom:role'];
-          if (!role) {
-            cognitoUser.signOut();
-            reject(new Error('Access Denied: Role attribute missing. Current user has no role defined or App Client lacks "custom:role" read permission.'));
-            return;
-          }
-          if (role !== 'Doctor' && role !== 'Assistant') {
-            cognitoUser.signOut();
-            reject(new Error('Access Denied: Unauthorized role. Must be Doctor or Assistant.'));
-            return;
-          }
-
-          _pendingCognitoUser = null;
-          resolve({ type: 'SUCCESS', token: tokenStr });
-        },
-        onFailure: (err) => {
-          reject(err);
-        },
-        newPasswordRequired: (_userAttributes, _requiredAttributes) => {
-          _pendingCognitoUser = cognitoUser;
-          resolve({ type: 'NEW_PASSWORD_REQUIRED' });
-        },
-      });
+  /**
+   * Performs login and checks for the "Doctor" or "Assistant" role.
+   * If a NEW_PASSWORD_REQUIRED challenge is returned, the success is deferred.
+   */
+  login: async (email: string, password: string): Promise<LoginResult> => {
+    const { nextStep, isSignedIn } = await signIn({
+      username: email,
+      password: password,
     });
-  },
 
-  completeNewPassword: (newPassword: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      if (!_pendingCognitoUser) {
-        reject(new Error('No active challenge. Please log in again.'));
-        return;
-      }
-      const cognitoUser = _pendingCognitoUser;
-      cognitoUser.completeNewPasswordChallenge(
-        newPassword,
-        {},
-        {
-          onSuccess: (result) => {
-            const idToken = result.getIdToken();
-            const payload = idToken.decodePayload();
-            const role = payload['custom:role'];
-            if (!role || (role !== 'Doctor' && role !== 'Assistant')) {
-              cognitoUser.signOut();
-              _pendingCognitoUser = null;
-              reject(new Error('Access Denied: Invalid or unauthorized role.'));
-              return;
-            }
-            _pendingCognitoUser = null;
-            resolve(idToken.getJwtToken());
-          },
-          onFailure: (err) => reject(err),
-        }
-      );
-    });
-  },
-
-  getCurrentSessionToken: (): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = userPool.getCurrentUser();
-      if (!cognitoUser) {
-        reject(new Error('No current user found'));
-        return;
-      }
-      cognitoUser.getSession((err: Error | null, session: any) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        if (session && session.isValid()) {
-          const idToken = session.getIdToken();
-          const payload = idToken.decodePayload();
-          const role = payload['custom:role'];
-
-          if (role !== 'Doctor' && role !== 'Assistant') {
-            cognitoUser.signOut();
-            reject(new Error('Access Denied: Unauthorized role.'));
-            return;
-          }
-          resolve(idToken.getJwtToken());
-        } else {
-          reject(new Error('Session invalid'));
-        }
-      });
-    });
-  },
-
-  forgotPassword: (email: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = new CognitoUser({
-        Username: email,
-        Pool: userPool,
-      });
-
-      cognitoUser.forgotPassword({
-        onSuccess: () => resolve(),
-        onFailure: (err) => reject(err),
-      });
-    });
-  },
-
-  confirmForgotPassword: (email: string, code: string, newPassword: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = new CognitoUser({
-        Username: email,
-        Pool: userPool,
-      });
-
-      cognitoUser.confirmPassword(code, newPassword, {
-        onSuccess: () => resolve(),
-        onFailure: (err) => reject(err),
-      });
-    });
-  },
-
-  changePassword: (oldPassword: string, newPassword: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const cognitoUser = userPool.getCurrentUser();
-      if (!cognitoUser) {
-        reject(new Error('No current user found'));
-        return;
-      }
-
-      cognitoUser.getSession((err: Error | null, session: any) => {
-        if (err || !session || !session.isValid()) {
-          reject(new Error('Session invalid, please log in again'));
-          return;
-        }
-
-        cognitoUser.changePassword(oldPassword, newPassword, (changeErr) => {
-          if (changeErr) {
-            reject(changeErr);
-            return;
-          }
-          resolve();
-        });
-      });
-    });
-  },
-
-  logout: () => {
-    _pendingCognitoUser = null;
-    const cognitoUser = userPool.getCurrentUser();
-    if (cognitoUser) {
-      cognitoUser.signOut();
+    if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+      return { type: 'NEW_PASSWORD_REQUIRED' };
     }
+
+    if (isSignedIn) {
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken?.toString() || '';
+      
+      const attributes = await fetchUserAttributes();
+      const role = attributes['custom:role'] as 'Doctor' | 'Assistant';
+
+      if (!role || (role !== 'Doctor' && role !== 'Assistant')) {
+        await signOut();
+        throw new Error('Access Denied: Unauthorized role. Must be Doctor or Assistant.');
+      }
+
+      const user: User = {
+        email: attributes.email || '',
+        sub: attributes.sub || '',
+        name: attributes.name || attributes.preferred_username || email,
+        role: role,
+        jwtToken: idToken
+      };
+
+      return { type: 'SUCCESS', user };
+    }
+
+    throw new Error('Login failed. Please check your credentials.');
+  },
+
+  /**
+   * Completes the "New Password Required" challenge.
+   */
+  completeNewPassword: async (newPassword: string): Promise<User> => {
+    const { nextStep, isSignedIn } = await confirmSignIn({
+      challengeResponse: newPassword
+    });
+
+    if (isSignedIn || nextStep.signInStep === 'DONE') {
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken?.toString() || '';
+      
+      const attributes = await fetchUserAttributes();
+      const role = attributes['custom:role'] as 'Doctor' | 'Assistant';
+
+      if (!role || (role !== 'Doctor' && role !== 'Assistant')) {
+        await signOut();
+        throw new Error('Access Denied: Unauthorized role.');
+      }
+
+      const user: User = {
+        email: attributes.email || '',
+        sub: attributes.sub || '',
+        name: attributes.name || attributes.preferred_username || '',
+        role: role,
+        jwtToken: idToken
+      };
+
+      return user;
+    }
+
+    throw new Error('Failed to complete password change challenge.');
+  },
+
+  /**
+   * Retreives the current valid ID token, refreshing it automatically if needed.
+   * Also verifies that the user still has an authorized role.
+   */
+  getCurrentSessionToken: async (): Promise<User> => {
+    const session = await fetchAuthSession();
+    
+    if (!session.tokens?.idToken) {
+      throw new Error('No active session found.');
+    }
+
+    const attributes = await fetchUserAttributes();
+    const idToken = session.tokens.idToken.toString();
+    const role = (session.tokens.idToken.payload as any)['custom:role'] as 'Doctor' | 'Assistant';
+
+    if (role !== 'Doctor' && role !== 'Assistant') {
+      await signOut();
+      throw new Error('Access Denied: Unauthorized role.');
+    }
+
+    const user: User = {
+        email: attributes.email || '',
+        sub: attributes.sub || '',
+        name: attributes.name || attributes.preferred_username || '',
+        role: role,
+        jwtToken: idToken
+    };
+
+    return user;
+  },
+
+  /**
+   * Initiates the forgot password flow (sends code to email).
+   */
+  forgotPassword: async (email: string): Promise<void> => {
+    await resetPassword({ username: email });
+  },
+
+  /**
+   * Confirms the new password using the code sent via email.
+   */
+  confirmForgotPassword: async (email: string, code: string, newPassword: string): Promise<void> => {
+    await confirmResetPassword({
+      username: email,
+      confirmationCode: code,
+      newPassword: newPassword
+    });
+  },
+
+  /**
+   * Changes the password for the currently logged-in user.
+   */
+  changePassword: async (oldPassword: string, newPassword: string): Promise<void> => {
+    await updatePassword({
+      oldPassword,
+      newPassword
+    });
+  },
+
+  /**
+   * Signs out the user globally.
+   */
+  logout: async () => {
+    await signOut();
   },
 };

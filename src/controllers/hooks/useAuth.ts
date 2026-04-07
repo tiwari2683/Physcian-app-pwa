@@ -2,8 +2,6 @@ import { useState, useCallback } from 'react';
 import { useAppDispatch } from './hooks';
 import { setCredentials, logoutUser, setLoading } from '../slices/authSlice';
 import { authService } from '../../services/auth/authService';
-import type { User } from '../../models';
-import { jwtDecode } from 'jwt-decode';
 
 export const useAuth = () => {
   const dispatch = useAppDispatch();
@@ -12,20 +10,11 @@ export const useAuth = () => {
   const checkSession = useCallback(async () => {
     dispatch(setLoading(true));
     try {
-      const token = await authService.getCurrentSessionToken();
-      const decoded: any = jwtDecode(token);
-
-      const user: User = {
-        email: decoded.email,
-        sub: decoded.sub,
-        name: decoded.name || decoded['cognito:username'],
-        role: decoded['custom:role'],
-        jwtToken: token,
-      };
+      const user = await authService.getCurrentSessionToken();
       dispatch(setCredentials(user));
     } catch (err: any) {
       console.log('Session check failed or user needs to log in:', err.message);
-      authService.logout();
+      await authService.logout();
       dispatch(logoutUser());
     } finally {
       dispatch(setLoading(false));
@@ -44,15 +33,7 @@ export const useAuth = () => {
       }
 
       // type === 'SUCCESS'
-      const decoded: any = jwtDecode(result.token);
-      const user: User = {
-        email: decoded.email,
-        sub: decoded.sub,
-        name: decoded.name || decoded['cognito:username'],
-        role: decoded['custom:role'],
-        jwtToken: result.token,
-      };
-      dispatch(setCredentials(user));
+      dispatch(setCredentials(result.user));
       return 'success';
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
@@ -66,15 +47,7 @@ export const useAuth = () => {
     setError(null);
     dispatch(setLoading(true));
     try {
-      const token = await authService.completeNewPassword(newPassword);
-      const decoded: any = jwtDecode(token);
-      const user: User = {
-        email: decoded.email,
-        sub: decoded.sub,
-        name: decoded.name || decoded['cognito:username'],
-        role: decoded['custom:role'],
-        jwtToken: token,
-      };
+      const user = await authService.completeNewPassword(newPassword);
       dispatch(setCredentials(user));
       return true;
     } catch (err: any) {
@@ -84,8 +57,8 @@ export const useAuth = () => {
     }
   };
 
-  const logout = () => {
-    authService.logout();
+  const logout = async () => {
+    await authService.logout();
     dispatch(logoutUser());
   };
 
