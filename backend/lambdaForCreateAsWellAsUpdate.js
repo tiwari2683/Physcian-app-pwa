@@ -1,8 +1,11 @@
-﻿import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
+import { CognitoIdentityProviderClient, AdminCreateUserCommand } from "@aws-sdk/client-cognito-identity-provider";
+const cognitoClient = new CognitoIdentityProviderClient({ region: "us-east-2" });
+const USER_POOL_ID = process.env.USER_POOL_ID;
 
 // Initialize AWS clients
 const dynamoClient = new DynamoDBClient({ region: "us-east-2" });
@@ -17,14 +20,26 @@ const s3 = new S3Client({
 });
 
 // Table names
-const PATIENTS_TABLE = 'Patients';
+const CLINICS_TABLE = process.env.CLINICS_TABLE || 'Clinics';
+const PATIENTS_TABLE = process.env.PATIENTS_TABLE || 'Patients';
+const VISITS_TABLE = process.env.VISITS_TABLE || 'Visits';
+const APPOINTMENTS_TABLE = process.env.APPOINTMENTS_TABLE || 'Appointments';
 const CLINICAL_HISTORY_TABLE = 'ClinicalParametersHistory';
 const MEDICAL_HISTORY_TABLE = 'MedicalHistoryEntries';
 const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
 const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
 const REPORTS_BUCKET = 'dr-gawli-patient-files-use2-5694';
-const VISITS_TABLE = 'Visits';
 const PRESCRIPTIONS_TABLE = 'Prescriptions';
+
+// GSI Index Names
+const PATIENT_TENANT_INDEX = 'tenant_id-patientId-index';
+const VISIT_TENANT_INDEX = 'tenant_id-visitId-index';
+const APPOINTMENT_TENANT_INDEX = 'tenant_id-appointmentId-index';
+
+// ============================================
+// FEATURE FLAGS
+// ============================================
+const ENFORCE_BILLING = process.env.ENFORCE_BILLING === 'true'; // Set to false by default unless in AWS env
 
 // ============================================
 // PRESIGNED URL GENERATION FOR UPLOADS
@@ -36,26 +51,28 @@ const PRESCRIPTIONS_TABLE = 'Prescriptions';
  */
 async function generatePresignedUploadUrl(requestData) {
     try {
-        const { patientId, fileName, fileType, category = 'uncategorized' } = requestData;
+        const { patientId, fileName, fileType, category = 'uncategorized', tenantId } = requestData;
 
         if (!patientId || !fileName) {
             return formatErrorResponse("Missing patientId or fileName");
         }
 
-        // Generate unique S3 key
+        // Generate unique S3 key using the Tenant ID to isolate clinics!
         const timestamp = Date.now();
         const randomSuffix = Math.floor(Math.random() * 10000);
         const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const s3Key = `${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
+        
+        // TASK 3: SECURE S3 PATH INJECTION
+        const s3Key = `${tenantId}/patients/${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
 
         console.log(`📤 Generating presigned URL for: ${s3Key}`);
 
-        // Create presigned PUT URL (expires in 5 minutes)
         const command = new PutObjectCommand({
             Bucket: REPORTS_BUCKET,
             Key: s3Key,
             ContentType: fileType || 'application/octet-stream',
             Metadata: {
+                'tenant-id': tenantId, // Track tenant in S3 metadata
                 'patient-id': patientId,
                 'original-name': sanitizedName,
                 'category': category,
@@ -63,27 +80,15 @@ async function generatePresignedUploadUrl(requestData) {
             }
         });
 
-        const presignedUrl = await getSignedUrl(s3, command, {
-            expiresIn: 300 // 5 minutes
+        const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+
+        return formatSuccessResponse({
+            success: true,
+            uploadUrl: presignedUrl,
+            s3Key: s3Key,
+            fileName: fileName,
+            expiresIn: 300
         });
-
-        console.log(`✅ Generated presigned URL for ${fileName}`);
-
-        return {
-            statusCode: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': true
-            },
-            body: JSON.stringify({
-                success: true,
-                uploadUrl: presignedUrl,
-                s3Key: s3Key,
-                fileName: fileName,
-                expiresIn: 300
-            })
-        };
     } catch (error) {
         console.error('❌ Error generating presigned URL:', error);
         return formatErrorResponse(`Failed to generate upload URL: ${error.message}`);
@@ -521,7 +526,6 @@ async function getPatientHistory(requestData) {
 export const handler = async (event, context) => {
     try {
         console.log("LOG: Lambda invoked");
-        console.log("LOG: HTTP method:", event.httpMethod || event.requestContext?.http?.method);
         context.callbackWaitsForEmptyEventLoop = false;
 
         // Handle CORS preflight
@@ -540,149 +544,134 @@ export const handler = async (event, context) => {
         }
 
         // ============================================================
+        // TASK 2: EXTRACT JWT CLAIMS & SECURITY GUARD
+        // ============================================================
+        let tenantId = null;
+        let userRole = null;
+
+        // Extract from API Gateway Request Context (handles REST and HTTP APIs)
+        const claims = event.requestContext?.authorizer?.claims || event.requestContext?.authorizer?.jwt?.claims;
+
+        if (claims) {
+            tenantId = claims['custom:tenant_id'];
+            userRole = claims['custom:role'];
+            console.log(`🔐 Authenticated as Role: ${userRole} | Tenant: ${tenantId}`);
+        }
+
+        // THE HARD BOUNDARY: Block if no tenant ID (unless SuperAdmin)
+        if (!tenantId && userRole !== 'SuperAdmin') {
+            console.error("❌ Unauthorized: Missing custom:tenant_id in Cognito Token");
+            return {
+                statusCode: 403,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+                body: JSON.stringify({ success: false, error: "Unauthorized: Missing Clinic ID" })
+            };
+        }
+
+        // ============================================================
         // HARDENED BODY PARSING
-        // Handles API Gateway proxy v1/v2, CloudFront, and direct invoke
         // ============================================================
         let requestData = {};
-
         try {
             if (event.body) {
-                // API Gateway proxy integration — body is always a string here
                 const rawBody = event.isBase64Encoded
                     ? Buffer.from(event.body, 'base64').toString('utf8')
                     : event.body;
-
-                // Handle double-stringified body (some CloudFront configs wrap it)
                 const parsed = JSON.parse(rawBody);
                 requestData = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
-
             } else if (event.action || event.patientId || event.name) {
-                // Direct Lambda invocation — event IS the payload already
                 requestData = event;
-
             } else if (event.requestContext && !event.body) {
-                // API Gateway proxy with empty body — treat as empty object
                 requestData = {};
-
             } else {
-                // Last resort fallback
                 requestData = event;
             }
         } catch (parseError) {
             console.error('❌ Body parse error:', parseError.message);
-            console.error('❌ Raw event.body was:', event.body);
             return formatErrorResponse(`Invalid JSON in request body: ${parseError.message}`);
         }
 
-        console.log("🧾 requestData action:", requestData.action);
-        console.log("🧾 requestData keys:", Object.keys(requestData));
+        // Inject security context into payload so all functions can use it in Task 3
+        requestData.tenantId = tenantId;
+        requestData.userRole = userRole;
 
         const action = requestData.action;
         console.log(`🎯 Action: ${action}`);
 
-        // Route to appropriate handler
+        // ============================================================
+        // TASK 2: THE SUBSCRIPTION SOFT GATE
+        // ============================================================
+        const writeActions = [
+            'initiateVisit', 'updateVisit', 'completeVisit', 'updateVisitStatus',
+            'saveFitnessCertificate', 'addMedicine', 'deletePatient',
+            'savePrescription', 'confirmFileUpload', 'deletePatientFile', 'deleteDraft'
+        ];
+
+        // Detect legacy create/update actions
+        const isLegacyWrite = (!action && requestData.patientId && requestData.updateMode) ||
+                              (!action && requestData.isPartialSave) ||
+                              (!action && requestData.name && requestData.age && requestData.sex);
+
+        if (writeActions.includes(action) || isLegacyWrite) {
+            if (tenantId && userRole !== 'SuperAdmin') {
+                const isSubValid = await checkClinicSubscription(tenantId);
+                
+                if (!isSubValid) {
+                    if (ENFORCE_BILLING) {
+                        console.error(`⛔ 402 Payment Required. Tenant ${tenantId} is expired/suspended.`);
+                        return {
+                            statusCode: 402,
+                            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+                            body: JSON.stringify({ success: false, error: "Payment Required: Clinic subscription expired or suspended." })
+                        };
+                    } else {
+                        console.warn(`⚠️ Notice: Clinic subscription expired for ${tenantId}, but allowed due to ENFORCE_BILLING=false`);
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // ROUTER
+        // ============================================================
         switch (action) {
-            case 'getPatientHistory':
-                return await getPatientHistory(requestData);
-
-            case 'getPresignedUploadUrl':
-                return await generatePresignedUploadUrl(requestData);
-
-            case 'validateRegistration':
-                return await validateRegistration(requestData);
-
-            case 'confirmFileUpload':
-                return await confirmFileUpload(requestData);
-
-            case 'getPatient':
-                return await handleGetPatient(requestData.patientId);
-
-            case 'getPatientFiles':
-                return await handleGetPatientFiles(requestData.patientId);
-
-            case 'deletePatientFile':
-                return await deletePatientFile(requestData);
-
-            case 'initiateVisit':
-                return await initiateVisit(requestData);
-
-            case 'getActiveVisit':
-                return await getActiveVisit(requestData.patientId);
-
-            case 'updateVisit':
-                return await updateVisit(requestData);
-
-            case 'completeVisit':
-                return await completeVisit(requestData);
-
-            case 'updateVisitStatus':
-                return await updateVisitStatus(requestData);
-
-            case 'getClinicalHistory':
-                return await fetchClinicalHistory(requestData.patientId);
-
-            case 'getMedicalHistory':
-                return await fetchMedicalHistory(requestData.patientId);
-
-            case 'getReportsHistory':
-                return await fetchReportsHistory(requestData.patientId);
-
-            case 'getDiagnosisHistory':
-                return await fetchDiagnosisHistory(requestData.patientId);
-
-            case 'getInvestigationsHistory':
-                return await fetchInvestigationsHistory(requestData.patientId);
-
-            case 'getAllPatients':
-                return await getAllPatients();
-
-            case 'getWaitingRoom':
-                return await handleGetWaitingRoom();
-
-            case 'searchPatients':
-                return await searchPatients(requestData);
-
-            case "deleteDraft":
-                return await deleteDraft(requestData);
-
-            case "saveFitnessCertificate":
-                return await saveFitnessCertificate(requestData);
-
-            case "getFitnessCertificates":
-                return await getFitnessCertificates(requestData.patientId);
-
-            case "searchMedicines":
-                return await searchMedicines(requestData);
-
-            case "addMedicine":
-                return await addMedicine(requestData);
-
-            case "deletePatient":
-                return await deletePatient(requestData);
-
-            case 'savePrescription':
-                return await savePrescription(requestData.payload);
-
-            case 'getPatientPrescriptions':
-                return await getPatientPrescriptions(requestData.patientId);
-
-            case 'getAllPrescriptions':
-                return await getAllPrescriptions();
-
+            case 'onboardClinic': return await onboardClinic(requestData);
+            case 'getPatientHistory': return await getPatientHistory(requestData);
+            case 'getPresignedUploadUrl': return await generatePresignedUploadUrl(requestData);
+            case 'validateRegistration': return await validateRegistration(requestData);
+            case 'confirmFileUpload': return await confirmFileUpload(requestData);
+            case 'getPatient': return await handleGetPatient(requestData.patientId); // Will fix to pass requestData in Task 3
+            case 'getPatientFiles': return await handleGetPatientFiles(requestData.patientId);
+            case 'deletePatientFile': return await deletePatientFile(requestData);
+            case 'initiateVisit': return await initiateVisit(requestData);
+            case 'getActiveVisit': return await getActiveVisit(requestData.patientId);
+            case 'updateVisit': return await updateVisit(requestData);
+            case 'completeVisit': return await completeVisit(requestData);
+            case 'updateVisitStatus': return await updateVisitStatus(requestData);
+            case 'getClinicalHistory': return await fetchClinicalHistory(requestData.patientId);
+            case 'getMedicalHistory': return await fetchMedicalHistory(requestData.patientId);
+            case 'getReportsHistory': return await fetchReportsHistory(requestData.patientId);
+            case 'getDiagnosisHistory': return await fetchDiagnosisHistory(requestData.patientId);
+            case 'getInvestigationsHistory': return await fetchInvestigationsHistory(requestData.patientId);
+            case 'getAllPatients': return await getAllPatients(requestData);
+            case 'getWaitingRoom': return await handleGetWaitingRoom(requestData);
+            case 'searchPatients': return await searchPatients(requestData);
+            case "deleteDraft": return await deleteDraft(requestData);
+            case "saveFitnessCertificate": return await saveFitnessCertificate(requestData);
+            case "getFitnessCertificates": return await getFitnessCertificates(requestData.patientId);
+            case "searchMedicines": return await searchMedicines(requestData);
+            case "addMedicine": return await addMedicine(requestData);
+            case "deletePatient": return await deletePatient(requestData);
+            case 'savePrescription': return await savePrescription(requestData.payload); // Will fix mapping in Task 3
+            case 'getPatientPrescriptions': return await getPatientPrescriptions(requestData.patientId);
+            case 'getAllPrescriptions': return await getAllPrescriptions(requestData);
             default:
-                // Legacy create/update operations (no action field)
-                if (requestData.patientId && requestData.updateMode) {
-                    return await updatePatientData(requestData);
-                } else if (requestData.isPartialSave) {
-                    return await processSectionSave(requestData);
-                } else if (requestData.name && requestData.age && requestData.sex) {
-                    // Plain patient creation — no action field
-                    return await processPatientData(requestData);
-                } else {
-                    // Unknown action — log it clearly so CloudWatch shows the problem
-                    console.error(`❌ Unknown or missing action: "${action}"`);
-                    console.error(`❌ Full requestData:`, JSON.stringify(requestData));
-                    return formatErrorResponse(`Unknown action: "${action}". Received keys: ${Object.keys(requestData).join(', ')}`);
+                if (requestData.patientId && requestData.updateMode) return await updatePatientData(requestData);
+                else if (requestData.isPartialSave) return await processSectionSave(requestData);
+                else if (requestData.name && requestData.age && requestData.sex) return await processPatientData(requestData);
+                else {
+                    console.error(`❌ Unknown action: "${action}"`);
+                    return formatErrorResponse(`Unknown action: "${action}"`);
                 }
         }
     } catch (error) {
@@ -799,6 +788,38 @@ async function validateRegistration(requestData) {
 // ============================================
 // HELPER FUNCTIONS (Minimal Stubs)
 // ============================================
+
+/**
+ * Checks if a clinic's subscription is active
+ */
+async function checkClinicSubscription(tenantId) {
+    if (!tenantId) return true; // Failsafe, though guarded later
+
+    try {
+        const clinicResult = await dynamodb.send(new GetCommand({
+            TableName: CLINICS_TABLE,
+            Key: { tenant_id: tenantId }
+        }));
+
+        if (!clinicResult.Item) {
+            console.warn(`⚠️ Clinic record not found for tenant: ${tenantId}`);
+            return false; // No record means no active subscription
+        }
+
+        const expiryDate = new Date(clinicResult.Item.subscription_expiry);
+        const now = new Date();
+
+        if (expiryDate < now || clinicResult.Item.status === 'SUSPENDED') {
+            return false; // Expired or suspended
+        }
+        return true; // Valid
+    } catch (error) {
+        console.error("❌ Error checking subscription:", error.message);
+        // If DB fails, we fail OPEN during testing, but ideally CLOSE in prod. 
+        // We'll return false to trigger the soft gate warning.
+        return false; 
+    }
+}
 
 function unmarshallDynamoDBItem(item) {
     if (!item) return null;
@@ -1177,29 +1198,39 @@ async function fetchInvestigationsHistory(patientId) {
     return formatSuccessResponse(await _fetchInvestigationsHistoryData(patientId));
 }
 
-async function getAllPatients() {
+async function getAllPatients(requestData) {
     try {
-        const result = await dynamodb.send(new ScanCommand({ TableName: PATIENTS_TABLE }));
+        const { tenantId, userRole } = requestData;
+        let command;
+
+        if (userRole === 'SuperAdmin') {
+            // SuperAdmin can see global metrics (Scan)
+            command = new ScanCommand({ TableName: PATIENTS_TABLE });
+        } else {
+            // Clinics strictly query their own partition
+            command = new QueryCommand({
+                TableName: PATIENTS_TABLE,
+                IndexName: PATIENT_TENANT_INDEX,
+                KeyConditionExpression: "tenant_id = :tid",
+                ExpressionAttributeValues: { ":tid": tenantId }
+            });
+        }
+        
+        const result = await dynamodb.send(command);
         const patients = result.Items || [];
 
-        console.log(`📋 Retrieved ${patients.length} patients from DynamoDB`);
+        console.log(`📋 Retrieved ${patients.length} patients for Tenant: ${tenantId}`);
 
-        // Enrich each patient's reportFiles with signed URLs
         const enrichedPatients = await Promise.all(
             patients.map(async (patient) => {
                 if (patient.reportFiles && Array.isArray(patient.reportFiles)) {
-                    console.log(`🔐 Enriching ${patient.reportFiles.length} files for patient: ${patient.patientId}`);
                     patient.reportFiles = await enrichPatientFilesWithSignedUrls(patient.reportFiles);
                 }
                 return patient;
             })
         );
 
-        return formatSuccessResponse({
-            success: true,
-            patients: enrichedPatients,
-            count: enrichedPatients.length
-        });
+        return formatSuccessResponse({ success: true, patients: enrichedPatients, count: enrichedPatients.length });
     } catch (error) {
         console.error('ERROR getting all patients:', error);
         return formatErrorResponse(`Failed to get patients: ${error.message}`, error);
@@ -1232,15 +1263,17 @@ async function searchPatients(requestData) {
         const searchTermClean = searchTerm.replace(/\D/g, ''); // Digits only for phone search
         const isPhoneSearch = /^\d{8,10}$/.test(searchTermClean);
 
-        // Fetch all patients (DynamoDB Scan - for small datasets this is acceptable)
-        const result = await dynamodb.send(new ScanCommand({
+        // Replace the ScanCommand with this:
+        const command = new QueryCommand({
             TableName: PATIENTS_TABLE,
+            IndexName: PATIENT_TENANT_INDEX,
+            KeyConditionExpression: "tenant_id = :tid",
             ProjectionExpression: "patientId, #n, age, sex, mobile, address, #s",
-            ExpressionAttributeNames: {
-                "#n": "name",
-                "#s": "status"
-            }
-        }));
+            ExpressionAttributeNames: { "#n": "name", "#s": "status" },
+            ExpressionAttributeValues: { ":tid": requestData.tenantId }
+        });
+        
+        const result = await dynamodb.send(command);
 
         const allPatients = result.Items || [];
         console.log(`📋 Scanned ${allPatients.length} patients`);
@@ -1546,6 +1579,7 @@ async function processPatientData(requestData) {
 
         const patientRecord = {
             patientId: newPatientId,
+            tenant_id: requestData.tenantId, // TASK 3: INJECT TENANT ID
             name,
             age: parseInt(age),
             sex,
@@ -1624,6 +1658,7 @@ async function initiateVisit(requestData) {
                 TableName: PATIENTS_TABLE,
                 Item: {
                     patientId,
+                    tenant_id: requestData.tenantId, // TASK 3: INJECT TENANT ID
                     name: name || "Unknown",
                     age: age ? parseInt(age) : 0,
                     sex: sex || "",
@@ -1641,6 +1676,7 @@ async function initiateVisit(requestData) {
         const visitItem = {
             visitId,
             patientId,
+            tenant_id: requestData.tenantId, // TASK 3: INJECT TENANT ID
             status: 'WAITING',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -1678,33 +1714,34 @@ async function initiateVisit(requestData) {
  * Retrieves the active visit for a patient
  * Queries for WAITING or IN_PROGRESS status
  */
-async function handleGetWaitingRoom() {
+async function handleGetWaitingRoom(requestData) {
     try {
-        console.log(`📡 Fetching Waiting Room Queue from Visits table...`);
+        const { tenantId } = requestData;
+        console.log(`📡 Fetching Waiting Room Queue for Tenant: ${tenantId}`);
 
+        // Secure Query using the Tenant Index
         const params = {
             TableName: VISITS_TABLE,
-            IndexName: 'status-createdAt-index',
-            KeyConditionExpression: "#s = :waiting",
-            ExpressionAttributeNames: {
-                "#s": "status"
-            },
+            IndexName: VISIT_TENANT_INDEX,
+            KeyConditionExpression: "tenant_id = :tid",
+            FilterExpression: "#s = :waiting",
+            ExpressionAttributeNames: { "#s": "status" },
             ExpressionAttributeValues: {
+                ":tid": tenantId,
                 ":waiting": "WAITING"
-            },
-            ScanIndexForward: true // Auto-sort by arrival time
+            }
         };
 
         const result = await dynamodb.send(new QueryCommand(params));
-        const visits = result.Items || [];
+        
+        // Because GSIs don't easily sort by a third attribute without composite keys, 
+        // we sort the waiting room array in memory by arrival time.
+        let visits = result.Items || [];
+        visits.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-        console.log(`✅ Found ${visits.length} patients in Waiting Room`);
+        console.log(`✅ Found ${visits.length} patients in Waiting Room for this clinic`);
 
-        return formatSuccessResponse({
-            success: true,
-            patients: visits,
-            count: visits.length
-        });
+        return formatSuccessResponse({ success: true, patients: visits, count: visits.length });
     } catch (error) {
         console.error('ERROR getting waiting room:', error);
         return formatErrorResponse(`Failed to get waiting room: ${error.message}`, error);
@@ -2216,3 +2253,61 @@ async function getAllPrescriptions() {
         return formatErrorResponse(error.message);
     }
 }
+
+/**
+ * TASK 6: Onboards a new Clinic and its first Admin Doctor
+ * ONLY Accessible by SuperAdmins
+ */
+async function onboardClinic(requestData) {
+    try {
+        const { clinicName, adminEmail, adminName, userRole } = requestData;
+
+        // HARD SECURITY GUARD
+        if (userRole !== 'SuperAdmin') {
+            return formatErrorResponse("Forbidden: Only SuperAdmins can onboard clinics.");
+        }
+        if (!clinicName || !adminEmail || !USER_POOL_ID) {
+            return formatErrorResponse("Missing required fields or USER_POOL_ID environment variable.");
+        }
+
+        // 1. Generate new Tenant ID
+        const newTenantId = `clinic_${randomUUID()}`;
+        console.log(`🏢 Onboarding new clinic: ${clinicName} with ID: ${newTenantId}`);
+
+        // 2. Set Subscription Expiry (Default: 1 Year from today)
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+
+        // 3. Save Clinic to DynamoDB
+        await dynamodb.send(new PutCommand({
+            TableName: CLINICS_TABLE,
+            Item: {
+                tenant_id: newTenantId,
+                clinic_name: clinicName,
+                subscription_expiry: expiryDate.toISOString(),
+                status: 'ACTIVE',
+                createdAt: new Date().toISOString()
+            }
+        }));
+
+        // 4. Provision the Doctor in AWS Cognito
+        const createUserCommand = new AdminCreateUserCommand({
+            UserPoolId: USER_POOL_ID,
+            Username: adminEmail.trim().toLowerCase(),
+            UserAttributes: [
+                { Name: 'email', Value: adminEmail.trim().toLowerCase() },
+                { Name: 'email_verified', Value: 'true' },
+                { Name: 'name', Value: adminName || 'Doctor' },
+                { Name: 'custom:role', Value: 'Doctor' },
+                { Name: 'custom:tenant_id', Value: newTenantId }
+            ],
+            DesiredDeliveryMediums: ['EMAIL'],
+            MessageAction: 'SUPPRESS'
+        });
+
+        await cognitoClient.send(createUserCommand);
+    } catch (error) {
+        console.error('❌ Handler error:', error);
+        return formatErrorResponse(error.message || 'Request failed');
+    }
+};

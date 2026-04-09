@@ -6,6 +6,7 @@ import { LoginScreen } from '../views/Auth/LoginScreen';
 import { ForgotPasswordScreen } from '../views/Auth/ForgotPasswordScreen';
 import { ForceChangePasswordScreen } from '../views/Auth/ForceChangePasswordScreen';
 import { useAppSelector } from '../controllers/hooks/hooks';
+import SuperAdminDashboard from '../views/SuperAdmin/Dashboard/SuperAdminDashboard';
 
 // 1. Lazy Load the Sub-Apps for Code Splitting
 const DoctorRoutes = lazy(() => import('./DoctorRoutes'));
@@ -25,7 +26,7 @@ const RoleRedirector = () => {
   
   if (user?.role === 'Doctor') return <Navigate to="/doctor/dashboard" replace />;
   if (user?.role === 'Assistant') return <Navigate to="/assistant/dashboard" replace />;
-  
+  if (user?.role === 'SuperAdmin') return <Navigate to="/superadmin/dashboard" replace />;
   // Fallback if role is unassigned or invalid
   return <Navigate to="/login" replace />;
 };
@@ -65,6 +66,8 @@ export const AppRouter = () => {
 
           {/* Catch-all for authenticated users: redirect back to root for sort-out */}
           <Route path="*" element={<Navigate to="/" replace />} />
+          {/* SuperAdmin Dashboard */}
+          <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
         </Route>
       </Routes>
     </BrowserRouter>

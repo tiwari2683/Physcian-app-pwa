@@ -1,15 +1,19 @@
 // src/models/index.ts
+import type { Clinic, ClinicStatus } from './ClinicTypes';
 
+export type { Clinic, ClinicStatus };
 export interface User {
   email: string;
   sub: string;
   name?: string;
-  role: 'Doctor' | 'Assistant';
+  role: 'SuperAdmin' | 'Doctor' | 'Assistant';
+  tenantId?: string;
   jwtToken?: string;
 }
 
 export interface Patient {
   patientId: string;
+  tenantId: string; // REQUIRED now for multi-clinic
   name: string;
   age: number | string;
   sex: string;
@@ -30,6 +34,7 @@ export interface Patient {
 export interface Appointment {
   id: string;
   patientId?: string;
+  tenantId: string; // REQUIRED now for multi-clinic
   patientName: string;
   age?: number | string;
   mobile?: string;
@@ -122,5 +127,11 @@ export interface ApiErrorResponse {
   message: string;
   code?: string;
   status?: number;
+}
+
+export interface Visit {
+  visitId: string;
+  patientId: string;
+  tenantId: string; // REQUIRED now for multi-clinic
 }
 

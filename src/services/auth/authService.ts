@@ -16,10 +16,6 @@ export type LoginResult =
   | { type: 'NEW_PASSWORD_REQUIRED' };
 
 export const authService = {
-  /**
-   * Performs login and checks for the "Doctor" or "Assistant" role.
-   * If a NEW_PASSWORD_REQUIRED challenge is returned, the success is deferred.
-   */
   login: async (email: string, password: string): Promise<LoginResult> => {
     const { nextStep, isSignedIn } = await signIn({
       username: email,
@@ -35,11 +31,19 @@ export const authService = {
       const idToken = session.tokens?.idToken?.toString() || '';
       
       const attributes = await fetchUserAttributes();
-      const role = attributes['custom:role'] as 'Doctor' | 'Assistant';
+      const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
+      const tenantId = attributes['custom:tenant_id'];
 
-      if (!role || (role !== 'Doctor' && role !== 'Assistant')) {
+      // GUARD 1: Must be a valid role
+      if (!role || (role !== 'SuperAdmin' && role !== 'Doctor' && role !== 'Assistant')) {
         await signOut();
-        throw new Error('Access Denied: Unauthorized role. Must be Doctor or Assistant.');
+        throw new Error('Access Denied: Unauthorized role.');
+      }
+
+      // GUARD 2: Clinic Staff MUST have a tenant ID (SuperAdmins do not need one)
+      if (role !== 'SuperAdmin' && !tenantId) {
+        await signOut();
+        throw new Error('Access Denied: Your account is not assigned to a registered clinic.');
       }
 
       const user: User = {
@@ -47,6 +51,7 @@ export const authService = {
         sub: attributes.sub || '',
         name: attributes.name || attributes.preferred_username || email,
         role: role,
+        tenantId: tenantId, // TASK 4: Inject Tenant ID into User object
         jwtToken: idToken
       };
 
@@ -56,9 +61,6 @@ export const authService = {
     throw new Error('Login failed. Please check your credentials.');
   },
 
-  /**
-   * Completes the "New Password Required" challenge.
-   */
   completeNewPassword: async (newPassword: string): Promise<User> => {
     const { nextStep, isSignedIn } = await confirmSignIn({
       challengeResponse: newPassword
@@ -69,11 +71,17 @@ export const authService = {
       const idToken = session.tokens?.idToken?.toString() || '';
       
       const attributes = await fetchUserAttributes();
-      const role = attributes['custom:role'] as 'Doctor' | 'Assistant';
+      const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
+      const tenantId = attributes['custom:tenant_id'];
 
-      if (!role || (role !== 'Doctor' && role !== 'Assistant')) {
+      if (!role || (role !== 'SuperAdmin' && role !== 'Doctor' && role !== 'Assistant')) {
         await signOut();
         throw new Error('Access Denied: Unauthorized role.');
+      }
+
+      if (role !== 'SuperAdmin' && !tenantId) {
+        await signOut();
+        throw new Error('Access Denied: Your account is not assigned to a registered clinic.');
       }
 
       const user: User = {
@@ -81,6 +89,7 @@ export const authService = {
         sub: attributes.sub || '',
         name: attributes.name || attributes.preferred_username || '',
         role: role,
+        tenantId: tenantId, // TASK 4: Inject Tenant ID
         jwtToken: idToken
       };
 
@@ -90,10 +99,6 @@ export const authService = {
     throw new Error('Failed to complete password change challenge.');
   },
 
-  /**
-   * Retreives the current valid ID token, refreshing it automatically if needed.
-   * Also verifies that the user still has an authorized role.
-   */
   getCurrentSessionToken: async (): Promise<User> => {
     const session = await fetchAuthSession();
     
@@ -103,11 +108,17 @@ export const authService = {
 
     const attributes = await fetchUserAttributes();
     const idToken = session.tokens.idToken.toString();
-    const role = (session.tokens.idToken.payload as any)['custom:role'] as 'Doctor' | 'Assistant';
+    const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
+    const tenantId = attributes['custom:tenant_id'];
 
-    if (role !== 'Doctor' && role !== 'Assistant') {
+    if (!role || (role !== 'SuperAdmin' && role !== 'Doctor' && role !== 'Assistant')) {
       await signOut();
       throw new Error('Access Denied: Unauthorized role.');
+    }
+
+    if (role !== 'SuperAdmin' && !tenantId) {
+      await signOut();
+      throw new Error('Access Denied: Your account is not assigned to a registered clinic.');
     }
 
     const user: User = {
@@ -115,22 +126,17 @@ export const authService = {
         sub: attributes.sub || '',
         name: attributes.name || attributes.preferred_username || '',
         role: role,
+        tenantId: tenantId, // TASK 4: Inject Tenant ID
         jwtToken: idToken
     };
 
     return user;
   },
 
-  /**
-   * Initiates the forgot password flow (sends code to email).
-   */
   forgotPassword: async (email: string): Promise<void> => {
     await resetPassword({ username: email });
   },
 
-  /**
-   * Confirms the new password using the code sent via email.
-   */
   confirmForgotPassword: async (email: string, code: string, newPassword: string): Promise<void> => {
     await confirmResetPassword({
       username: email,
@@ -139,9 +145,6 @@ export const authService = {
     });
   },
 
-  /**
-   * Changes the password for the currently logged-in user.
-   */
   changePassword: async (oldPassword: string, newPassword: string): Promise<void> => {
     await updatePassword({
       oldPassword,
@@ -149,9 +152,6 @@ export const authService = {
     });
   },
 
-  /**
-   * Signs out the user globally.
-   */
   logout: async () => {
     await signOut();
   },
