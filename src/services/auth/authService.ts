@@ -1,8 +1,8 @@
-import { 
-  signIn, 
-  signOut, 
-  fetchAuthSession, 
-  fetchUserAttributes, 
+import {
+  signIn,
+  signOut,
+  fetchAuthSession,
+  fetchUserAttributes,
   confirmSignIn,
   resetPassword,
   confirmResetPassword,
@@ -29,7 +29,7 @@ export const authService = {
     if (isSignedIn) {
       const session = await fetchAuthSession();
       const idToken = session.tokens?.idToken?.toString() || '';
-      
+
       const attributes = await fetchUserAttributes();
       const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
       const tenantId = attributes['custom:tenant_id'];
@@ -69,7 +69,7 @@ export const authService = {
     if (isSignedIn || nextStep.signInStep === 'DONE') {
       const session = await fetchAuthSession();
       const idToken = session.tokens?.idToken?.toString() || '';
-      
+
       const attributes = await fetchUserAttributes();
       const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
       const tenantId = attributes['custom:tenant_id'];
@@ -99,38 +99,17 @@ export const authService = {
     throw new Error('Failed to complete password change challenge.');
   },
 
-  getCurrentSessionToken: async (): Promise<User> => {
+  // ✅ FIXED: Returns the raw JWT string so apiClient can use it directly
+  // Previously returned a User object, causing "Bearer [object Object]" to be sent
+  getCurrentSessionToken: async (): Promise<string> => {
     const session = await fetchAuthSession();
-    
+
     if (!session.tokens?.idToken) {
       throw new Error('No active session found.');
     }
 
-    const attributes = await fetchUserAttributes();
     const idToken = session.tokens.idToken.toString();
-    const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
-    const tenantId = attributes['custom:tenant_id'];
-
-    if (!role || (role !== 'SuperAdmin' && role !== 'Doctor' && role !== 'Assistant')) {
-      await signOut();
-      throw new Error('Access Denied: Unauthorized role.');
-    }
-
-    if (role !== 'SuperAdmin' && !tenantId) {
-      await signOut();
-      throw new Error('Access Denied: Your account is not assigned to a registered clinic.');
-    }
-
-    const user: User = {
-        email: attributes.email || '',
-        sub: attributes.sub || '',
-        name: attributes.name || attributes.preferred_username || '',
-        role: role,
-        tenantId: tenantId, // TASK 4: Inject Tenant ID
-        jwtToken: idToken
-    };
-
-    return user;
+    return idToken;
   },
 
   forgotPassword: async (email: string): Promise<void> => {

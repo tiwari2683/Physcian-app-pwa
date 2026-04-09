@@ -61,7 +61,7 @@ async function generatePresignedUploadUrl(requestData) {
         const timestamp = Date.now();
         const randomSuffix = Math.floor(Math.random() * 10000);
         const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-        
+
         // TASK 3: SECURE S3 PATH INJECTION
         const s3Key = `${tenantId}/patients/${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
 
@@ -552,6 +552,10 @@ export const handler = async (event, context) => {
         // Extract from API Gateway Request Context (handles REST and HTTP APIs)
         const claims = event.requestContext?.authorizer?.claims || event.requestContext?.authorizer?.jwt?.claims;
 
+        // TEMPORARY DEBUG LOGS
+        console.log('🔍 DEBUG requestContext:', JSON.stringify(event.requestContext, null, 2));
+        console.log('🔍 DEBUG claims:', JSON.stringify(claims, null, 2));
+
         if (claims) {
             tenantId = claims['custom:tenant_id'];
             userRole = claims['custom:role'];
@@ -609,13 +613,13 @@ export const handler = async (event, context) => {
 
         // Detect legacy create/update actions
         const isLegacyWrite = (!action && requestData.patientId && requestData.updateMode) ||
-                              (!action && requestData.isPartialSave) ||
-                              (!action && requestData.name && requestData.age && requestData.sex);
+            (!action && requestData.isPartialSave) ||
+            (!action && requestData.name && requestData.age && requestData.sex);
 
         if (writeActions.includes(action) || isLegacyWrite) {
             if (tenantId && userRole !== 'SuperAdmin') {
                 const isSubValid = await checkClinicSubscription(tenantId);
-                
+
                 if (!isSubValid) {
                     if (ENFORCE_BILLING) {
                         console.error(`⛔ 402 Payment Required. Tenant ${tenantId} is expired/suspended.`);
@@ -817,7 +821,7 @@ async function checkClinicSubscription(tenantId) {
         console.error("❌ Error checking subscription:", error.message);
         // If DB fails, we fail OPEN during testing, but ideally CLOSE in prod. 
         // We'll return false to trigger the soft gate warning.
-        return false; 
+        return false;
     }
 }
 
@@ -1150,9 +1154,9 @@ async function _fetchInvestigationsHistoryData(patientId) {
                 let rawInv = v.advisedInvestigations || [];
                 if (typeof rawInv === 'string') {
                     const trimmed = rawInv.trim();
-                    // \u2500\u2500 BUG #8 FIX: Detect JSON-serialized arrays vs bullet-point strings \u2500\u2500
+                    // ── BUG #8 FIX: Detect JSON-serialized arrays vs bullet-point strings ──
                     // The assistant portal serializes as JSON: "[\"X-Ray\",\"CBC\"]"
-                    // The doctor's mobile app uses bullet-point text: "\u2022 X-Ray\n\u2022 CBC"
+                    // The doctor's mobile app uses bullet-point text: "• X-Ray\n• CBC"
                     // Both must be correctly parsed into string[].
                     if (trimmed.startsWith('[') || trimmed.startsWith('"')) {
                         try {
@@ -1215,7 +1219,7 @@ async function getAllPatients(requestData) {
                 ExpressionAttributeValues: { ":tid": tenantId }
             });
         }
-        
+
         const result = await dynamodb.send(command);
         const patients = result.Items || [];
 
@@ -1272,7 +1276,7 @@ async function searchPatients(requestData) {
             ExpressionAttributeNames: { "#n": "name", "#s": "status" },
             ExpressionAttributeValues: { ":tid": requestData.tenantId }
         });
-        
+
         const result = await dynamodb.send(command);
 
         const allPatients = result.Items || [];
@@ -1733,7 +1737,7 @@ async function handleGetWaitingRoom(requestData) {
         };
 
         const result = await dynamodb.send(new QueryCommand(params));
-        
+
         // Because GSIs don't easily sort by a third attribute without composite keys, 
         // we sort the waiting room array in memory by arrival time.
         let visits = result.Items || [];
@@ -1782,6 +1786,7 @@ async function getActiveVisit(patientId) {
         return formatErrorResponse(`Failed to get active visit: ${error.message}`);
     }
 }
+
 /**
  * Updates ONLY the status of a visit (e.g., WAITING -> IN_PROGRESS)
  * Used to immediately remove patients from the Assistant's Waiting Room queue
@@ -1952,8 +1957,6 @@ async function updateVisit(requestData) {
     }
 }
 
-
-
 // ============================================
 // FITNESS CERTIFICATE OPERATIONS
 // ============================================
@@ -2046,7 +2049,6 @@ async function getFitnessCertificates(patientId) {
         return formatErrorResponse(`Failed to fetch certificates: ${error.message}`);
     }
 }
-
 
 // ============================================
 // DYNAMIC MEDICINE MASTER LOGIC
@@ -2302,12 +2304,19 @@ async function onboardClinic(requestData) {
                 { Name: 'custom:tenant_id', Value: newTenantId }
             ],
             DesiredDeliveryMediums: ['EMAIL'],
-            MessageAction: 'SUPPRESS'
+            MessageAction: 'SUPPRESS' // Remove this line if you want AWS to actually send the email instantly
         });
 
         await cognitoClient.send(createUserCommand);
+        console.log(`✅ Provisioned Doctor account for ${adminEmail}`);
+
+        return formatSuccessResponse({
+            success: true,
+            tenant_id: newTenantId,
+            message: `Clinic ${clinicName} successfully created and Doctor account provisioned.`
+        });
     } catch (error) {
-        console.error('❌ Handler error:', error);
-        return formatErrorResponse(error.message || 'Request failed');
+        console.error('❌ Error onboarding clinic:', error);
+        return formatErrorResponse(`Failed to onboard clinic: ${error.message}`);
     }
-};
+}
