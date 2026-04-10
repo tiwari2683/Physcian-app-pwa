@@ -132,6 +132,14 @@ async function confirmFileUpload(requestData) {
             return formatErrorResponse("Patient not found");
         }
 
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (patientResult.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to confirm upload for ${patientResult.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
+
         // Create file metadata (NO URLs, NO Base64)
         const fileMetadata = {
             s3Key: s3Key,
@@ -245,8 +253,9 @@ async function enrichPatientFilesWithSignedUrls(reportFiles) {
 // PATIENT DATA RETRIEVAL
 // ============================================
 
-async function handleGetPatient(patientId, forceRefresh = false) {
+async function handleGetPatient(requestData) {
     try {
+        const { patientId, tenantId, userRole } = requestData;
         console.log(`🔍 Getting patient data for ID: ${patientId}`);
 
         const command = new GetItemCommand({
@@ -254,9 +263,7 @@ async function handleGetPatient(patientId, forceRefresh = false) {
             Key: { "patientId": { "S": patientId } }
         });
 
-        if (forceRefresh) {
-            command.input.ConsistentRead = true;
-        }
+        // if (forceRefresh) command.input.ConsistentRead = true; // Dropping forceRefresh from lambda entirely since router no longer provides it, data is real-time anyway
 
         const result = await dynamoClient.send(command);
 
@@ -265,6 +272,14 @@ async function handleGetPatient(patientId, forceRefresh = false) {
         }
 
         const patientData = unmarshallDynamoDBItem(result.Item);
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (patientData.tenant_id !== tenantId && userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to fetch patient from ${patientData.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
 
         // Enrich report files with signed URLs (non-destructive)
         if (patientData.reportFiles && Array.isArray(patientData.reportFiles)) {
@@ -340,8 +355,9 @@ async function handleGetPatient(patientId, forceRefresh = false) {
 /**
  * Get all patient files with signed URLs
  */
-async function handleGetPatientFiles(patientId) {
+async function handleGetPatientFiles(requestData) {
     try {
+        const { patientId, tenantId, userRole } = requestData;
         console.log(`📂 Getting files for patient: ${patientId}`);
 
         // Get from DynamoDB
@@ -352,6 +368,16 @@ async function handleGetPatientFiles(patientId) {
 
         if (!patientResult.Item) {
             return formatErrorResponse("Patient not found");
+        }
+
+        const patientData = patientResult.Item;
+        
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (patientData.tenant_id !== tenantId && userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to fetch patient files from ${patientData.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
         }
 
         const reportFiles = patientResult.Item.reportFiles || [];
@@ -399,6 +425,14 @@ async function deletePatientFile(requestData) {
 
         if (!patientResult.Item) {
             return formatErrorResponse("Patient not found");
+        }
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (patientResult.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to delete file for ${patientResult.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
         }
 
         // Find and remove file from array
@@ -487,6 +521,17 @@ async function getPatientHistory(requestData) {
         });
 
         const data = await dynamodb.send(command);
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (data.Items && data.Items.length > 0) {
+            const sampleVisit = data.Items[0];
+            if (sampleVisit.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+                console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to get history from ${sampleVisit.tenant_id}`);
+                return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+            }
+        }
 
         let formattedRecords = [];
 
@@ -651,30 +696,30 @@ export const handler = async (event, context) => {
             case 'getPresignedUploadUrl': return await generatePresignedUploadUrl(requestData);
             case 'validateRegistration': return await validateRegistration(requestData);
             case 'confirmFileUpload': return await confirmFileUpload(requestData);
-            case 'getPatient': return await handleGetPatient(requestData.patientId); // Will fix to pass requestData in Task 3
-            case 'getPatientFiles': return await handleGetPatientFiles(requestData.patientId);
+            case 'getPatient': return await handleGetPatient(requestData);
+            case 'getPatientFiles': return await handleGetPatientFiles(requestData);
             case 'deletePatientFile': return await deletePatientFile(requestData);
             case 'initiateVisit': return await initiateVisit(requestData);
-            case 'getActiveVisit': return await getActiveVisit(requestData.patientId);
+            case 'getActiveVisit': return await getActiveVisit(requestData);
             case 'updateVisit': return await updateVisit(requestData);
             case 'completeVisit': return await completeVisit(requestData);
             case 'updateVisitStatus': return await updateVisitStatus(requestData);
-            case 'getClinicalHistory': return await fetchClinicalHistory(requestData.patientId);
-            case 'getMedicalHistory': return await fetchMedicalHistory(requestData.patientId);
-            case 'getReportsHistory': return await fetchReportsHistory(requestData.patientId);
-            case 'getDiagnosisHistory': return await fetchDiagnosisHistory(requestData.patientId);
-            case 'getInvestigationsHistory': return await fetchInvestigationsHistory(requestData.patientId);
+            case 'getClinicalHistory': return await fetchClinicalHistory(requestData);
+            case 'getMedicalHistory': return await fetchMedicalHistory(requestData);
+            case 'getReportsHistory': return await fetchReportsHistory(requestData);
+            case 'getDiagnosisHistory': return await fetchDiagnosisHistory(requestData);
+            case 'getInvestigationsHistory': return await fetchInvestigationsHistory(requestData);
             case 'getAllPatients': return await getAllPatients(requestData);
             case 'getWaitingRoom': return await handleGetWaitingRoom(requestData);
             case 'searchPatients': return await searchPatients(requestData);
             case "deleteDraft": return await deleteDraft(requestData);
             case "saveFitnessCertificate": return await saveFitnessCertificate(requestData);
-            case "getFitnessCertificates": return await getFitnessCertificates(requestData.patientId);
+            case "getFitnessCertificates": return await getFitnessCertificates(requestData);
             case "searchMedicines": return await searchMedicines(requestData);
             case "addMedicine": return await addMedicine(requestData);
             case "deletePatient": return await deletePatient(requestData);
-            case 'savePrescription': return await savePrescription(requestData.payload); // Will fix mapping in Task 3
-            case 'getPatientPrescriptions': return await getPatientPrescriptions(requestData.patientId);
+            case 'savePrescription': return await savePrescription(requestData);
+            case 'getPatientPrescriptions': return await getPatientPrescriptions(requestData);
             case 'getAllPrescriptions': return await getAllPrescriptions(requestData);
             default:
                 if (requestData.patientId && requestData.updateMode) return await updatePatientData(requestData);
@@ -1059,8 +1104,13 @@ async function _fetchClinicalHistoryData(patientId) {
     }
 }
 
-async function fetchClinicalHistory(patientId) {
-    return formatSuccessResponse(await _fetchClinicalHistoryData(patientId));
+async function fetchClinicalHistory(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
+    const raw = await _fetchClinicalHistoryData(patientId);
+    if (raw?.clinicalHistory && userRole !== 'SuperAdmin') {
+        raw.clinicalHistory = raw.clinicalHistory.filter(v => !v.tenant_id || v.tenant_id === tenantId);
+    }
+    return formatSuccessResponse(raw);
 }
 
 async function _fetchMedicalHistoryData(patientId) {
@@ -1087,8 +1137,13 @@ async function _fetchMedicalHistoryData(patientId) {
     }
 }
 
-async function fetchMedicalHistory(patientId) {
-    return formatSuccessResponse(await _fetchMedicalHistoryData(patientId));
+async function fetchMedicalHistory(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
+    const raw = await _fetchMedicalHistoryData(patientId);
+    if (raw?.medicalHistory && userRole !== 'SuperAdmin') {
+        raw.medicalHistory = raw.medicalHistory.filter(v => !v.tenant_id || v.tenant_id === tenantId);
+    }
+    return formatSuccessResponse(raw);
 }
 
 async function _fetchReportsHistoryData(patientId) {
@@ -1115,8 +1170,13 @@ async function _fetchReportsHistoryData(patientId) {
     }
 }
 
-async function fetchReportsHistory(patientId) {
-    return formatSuccessResponse(await _fetchReportsHistoryData(patientId));
+async function fetchReportsHistory(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
+    const raw = await _fetchReportsHistoryData(patientId);
+    if (raw?.reportsHistory && userRole !== 'SuperAdmin') {
+        raw.reportsHistory = raw.reportsHistory.filter(v => !v.tenant_id || v.tenant_id === tenantId);
+    }
+    return formatSuccessResponse(raw);
 }
 
 async function _fetchDiagnosisHistoryData(patientId) {
@@ -1142,8 +1202,13 @@ async function _fetchDiagnosisHistoryData(patientId) {
     }
 }
 
-async function fetchDiagnosisHistory(patientId) {
-    return formatSuccessResponse(await _fetchDiagnosisHistoryData(patientId));
+async function fetchDiagnosisHistory(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
+    const raw = await _fetchDiagnosisHistoryData(patientId);
+    if (raw?.diagnosisHistory && userRole !== 'SuperAdmin') {
+        raw.diagnosisHistory = raw.diagnosisHistory.filter(v => !v.tenant_id || v.tenant_id === tenantId);
+    }
+    return formatSuccessResponse(raw);
 }
 
 async function _fetchInvestigationsHistoryData(patientId) {
@@ -1205,8 +1270,13 @@ async function _fetchInvestigationsHistoryData(patientId) {
     }
 }
 
-async function fetchInvestigationsHistory(patientId) {
-    return formatSuccessResponse(await _fetchInvestigationsHistoryData(patientId));
+async function fetchInvestigationsHistory(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
+    const raw = await _fetchInvestigationsHistoryData(patientId);
+    if (raw?.investigationsHistory && userRole !== 'SuperAdmin') {
+        raw.investigationsHistory = raw.investigationsHistory.filter(v => !v.tenant_id || v.tenant_id === tenantId);
+    }
+    return formatSuccessResponse(raw);
 }
 
 async function getAllPatients(requestData) {
@@ -1345,6 +1415,18 @@ async function searchPatients(requestData) {
 }
 
 async function deletePatient(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
+    if (!patientId) return formatErrorResponse("Missing patientId");
+
+    // ============================================
+    // ZERO-TRUST TENANT CHECK
+    // ============================================
+    const record = await dynamodb.send(new GetCommand({ TableName: PATIENTS_TABLE, Key: { patientId } }));
+    if (record.Item && record.Item.tenant_id !== tenantId && userRole !== 'SuperAdmin') {
+        console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to delete patient from ${record.Item.tenant_id}`);
+        return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+    }
+
     await dynamodb.send(new DeleteCommand({
         TableName: PATIENTS_TABLE,
         Key: { patientId: requestData.patientId }
@@ -1373,6 +1455,14 @@ async function updatePatientData(requestData) {
             }));
             existingPatient = existingResult.Item;
             console.log(`📋 Fetched existing patient, has ${existingPatient?.reportFiles?.length || 0} files`);
+            
+            // ============================================
+            // ZERO-TRUST TENANT CHECK
+            // ============================================
+            if (existingPatient && existingPatient.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+                console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to update patient from ${existingPatient.tenant_id}`);
+                return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+            }
         } catch (fetchError) {
             console.warn(`⚠️ Could not fetch existing patient: ${fetchError.message}`);
             // Continue anyway - will create if not exists
@@ -1680,6 +1770,14 @@ async function initiateVisit(requestData) {
                     reportFiles: []
                 }
             }));
+        } else {
+            // ============================================
+            // ZERO-TRUST TENANT CHECK ON EXISTING PATIENT
+            // ============================================
+            if (patientResult.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+                console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to initiate visit for patient from clinic ${patientResult.Item.tenant_id}`);
+                return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+            }
         }
 
         const visitId = `visit_${randomUUID()}`;
@@ -1759,8 +1857,9 @@ async function handleGetWaitingRoom(requestData) {
     }
 }
 
-async function getActiveVisit(patientId) {
+async function getActiveVisit(requestData) {
     try {
+        const { patientId, tenantId, userRole } = requestData;
         if (!patientId) return formatErrorResponse("Missing patientId");
 
         console.log(`🔍 Checking for active visit for patient: ${patientId}`);
@@ -1780,6 +1879,15 @@ async function getActiveVisit(patientId) {
 
             if (result.Items && result.Items.length > 0) {
                 activeVisit = result.Items[0];
+                
+                // ============================================
+                // ZERO-TRUST TENANT CHECK
+                // ============================================
+                if (activeVisit.tenant_id !== tenantId && userRole !== 'SuperAdmin') {
+                    console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to get active visit from ${activeVisit.tenant_id}`);
+                    return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+                }
+
                 break;
             }
         }
@@ -1807,6 +1915,15 @@ async function updateVisitStatus(requestData) {
         }
 
         console.log(`🔄 Updating visit ${visitId} status to ${status}`);
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        const existingVisit = await dynamodb.send(new GetCommand({ TableName: VISITS_TABLE, Key: { visitId } }));
+        if (existingVisit.Item && existingVisit.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to update status on visit from ${existingVisit.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
 
         const params = {
             TableName: VISITS_TABLE,
@@ -1846,6 +1963,15 @@ async function completeVisit(requestData) {
 
         const timestamp = new Date().toISOString();
         console.log(`🏁 Completing visit ${visitId} for patient ${patientId}`);
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        const visitRecord = await dynamodb.send(new GetCommand({ TableName: VISITS_TABLE, Key: { visitId } }));
+        if (visitRecord.Item && visitRecord.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to complete visit from ${visitRecord.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
 
         // Prepare snapshot for Master record
         const visitSummary = {
@@ -1919,6 +2045,15 @@ async function updateVisit(requestData) {
 
         console.log(`🔄 Updating visit: ${visitId}`);
 
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        const visitFetch = await dynamodb.send(new GetCommand({ TableName: VISITS_TABLE, Key: { visitId } }));
+        if (visitFetch.Item && visitFetch.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to update visit from ${visitFetch.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
+
         const updateExpression = [];
         const expressionAttributeNames = {};
         const expressionAttributeValues = {};
@@ -1988,6 +2123,14 @@ async function saveFitnessCertificate(requestData) {
             return formatErrorResponse("Patient not found");
         }
 
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (patientResult.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to save fitness cert for ${patientResult.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
+
         const currentCertificates = patientResult.Item.fitnessCertificates || [];
 
         // Check if certificate exists (by ID) to support updates vs inserts
@@ -2029,18 +2172,26 @@ async function saveFitnessCertificate(requestData) {
     }
 }
 
-async function getFitnessCertificates(patientId) {
+async function getFitnessCertificates(requestData) {
     try {
+        const { patientId, tenantId, userRole } = requestData;
         console.log(`📜 Fetching fitness certificates for: ${patientId}`);
 
         const result = await dynamodb.send(new GetCommand({
             TableName: PATIENTS_TABLE,
-            Key: { patientId },
-            ProjectionExpression: "fitnessCertificates" // Only fetch certificates
+            Key: { patientId }
         }));
 
         if (!result.Item) {
             return formatErrorResponse("Patient not found");
+        }
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (result.Item.tenant_id !== tenantId && userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to get fitness certs from ${result.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
         }
 
         const certificates = result.Item.fitnessCertificates || [];
@@ -2170,8 +2321,10 @@ async function addMedicine(requestData) {
     }
 }
 
-async function savePrescription(payload) {
+async function savePrescription(requestData) {
     try {
+        // Support both direct requestData and nested payload for backward compat
+        const payload = requestData.payload || requestData;
         const {
             patientId, patientName, age, gender, visitDate,
             doctorName, medications, diagnosis,
@@ -2180,12 +2333,22 @@ async function savePrescription(payload) {
 
         if (!patientId) return formatErrorResponse("Missing patientId");
 
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        const patientRecord = await dynamodb.send(new GetCommand({ TableName: PATIENTS_TABLE, Key: { patientId } }));
+        if (patientRecord.Item && patientRecord.Item.tenant_id !== requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${requestData.tenantId} attempted to save prescription for ${patientRecord.Item.tenant_id}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
+
         const prescriptionId = randomUUID();
         const timestamp = new Date().toISOString();
 
         const item = {
             prescriptionId,
             patientId,
+            tenant_id: requestData.tenantId,   // ← Stamped for clinic-wise isolation
             patientName: patientName || 'Unknown',
             age: age || 'N/A',
             gender: gender || 'N/A',
@@ -2227,7 +2390,8 @@ async function savePrescription(payload) {
     }
 }
 
-async function getPatientPrescriptions(patientId) {
+async function getPatientPrescriptions(requestData) {
+    const { patientId, tenantId, userRole } = requestData;
     if (!patientId) return formatErrorResponse("Missing patientId");
     try {
         const result = await dynamodb.send(new QueryCommand({
@@ -2236,7 +2400,9 @@ async function getPatientPrescriptions(patientId) {
             KeyConditionExpression: "patientId = :pid",
             ExpressionAttributeValues: { ":pid": patientId }
         }));
-        return formatSuccessResponse(result.Items || []);
+        // ClientSide filter by tenant_id — prescriptions inherit tenantId from patient write
+        const items = (result.Items || []).filter(p => !p.tenant_id || p.tenant_id === tenantId || userRole === 'SuperAdmin');
+        return formatSuccessResponse(items);
     } catch (e) {
         // Graceful fallback if GSI doesn't exist yet
         if (e.name === 'ValidationException' || e.name === 'ResourceNotFoundException') {
@@ -2252,10 +2418,21 @@ async function getPatientPrescriptions(patientId) {
     }
 }
 
-async function getAllPrescriptions() {
+async function getAllPrescriptions(requestData) {
     try {
+        const { tenantId, userRole } = requestData;
+
+        if (userRole === 'SuperAdmin') {
+            // SuperAdmin sees all (global view)
+            const result = await dynamodb.send(new ScanCommand({ TableName: PRESCRIPTIONS_TABLE }));
+            return formatSuccessResponse(result.Items || []);
+        }
+
+        // Regular users: scope to their clinic only
         const result = await dynamodb.send(new ScanCommand({
-            TableName: PRESCRIPTIONS_TABLE
+            TableName: PRESCRIPTIONS_TABLE,
+            FilterExpression: "tenant_id = :tid",
+            ExpressionAttributeValues: { ":tid": tenantId }
         }));
         return formatSuccessResponse(result.Items || []);
     } catch (error) {
@@ -2324,6 +2501,23 @@ async function onboardClinic(requestData) {
         const cognitoResponse = await cognitoClient.send(createUserCommand);
         console.log(`✅ Provisioned Doctor account for ${adminEmail}`);
         console.log(`📧 Temporary credentials sent to: ${adminEmail}`);
+
+        // 5. Write Doctor profile to ClinicStaff DynamoDB table
+        //    Without this, getClinicStaff returns 0 results even though doctorCount = 1
+        await dynamodb.send(new PutCommand({
+            TableName: CLINIC_STAFF_TABLE,
+            Item: {
+                tenant_id: newTenantId,
+                email: adminEmail.trim().toLowerCase(),
+                username: cognitoResponse.User?.Username || adminEmail.trim().toLowerCase(),
+                name: adminName || 'Doctor',
+                role: 'Doctor',
+                status: 'FORCE_CHANGE_PASSWORD',
+                enabled: true,
+                createdAt: new Date().toISOString()
+            }
+        }));
+        console.log(`✅ Doctor profile written to ClinicStaff table for ${adminEmail}`);
 
         return formatSuccessResponse({
             success: true,

@@ -6,7 +6,7 @@ import { apiClient } from '../../../services/api/apiClient';
 import type { RootState } from '../../../controllers/store';
 import {
   Building2, Users, UserCog, RefreshCw, CheckCircle,
-  Stethoscope, ClipboardList, Plus, LogOut, Wrench, Database
+  Stethoscope, ClipboardList, Plus, LogOut
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,11 +89,29 @@ function OnboardForm({ onSuccess }: OnboardFormProps) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [form, setForm] = useState({ clinicName: '', address: '', contactNumber: '', adminName: '', adminEmail: '' });
 
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }));
 
+  // Digits-only, max 10 digits for Indian mobile numbers
+  const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setForm(f => ({ ...f, contactNumber: digits }));
+    if (digits.length > 0 && digits.length < 10) {
+      setPhoneError('Phone number must be exactly 10 digits.');
+    } else {
+      setPhoneError(null);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Validate Indian phone number: exactly 10 digits, starts with 6-9
+    if (form.contactNumber && !/^[6-9]\d{9}$/.test(form.contactNumber)) {
+      setPhoneError('Enter a valid 10-digit Indian mobile number (starting with 6–9).');
+      return;
+    }
     setLoading(true);
     setMessage(null);
     try {
@@ -149,7 +167,27 @@ function OnboardForm({ onSuccess }: OnboardFormProps) {
           </div>
           <div>
             <label className={labelCls}>Contact Number</label>
-            <input type="tel" className={inputCls} placeholder="e.g., +91 98765 43210" value={form.contactNumber} onChange={set('contactNumber')} />
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-mono select-none">+91</span>
+              <input
+                id="contact-number-input"
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                className={`${inputCls} pl-12 ${phoneError ? 'border-red-500/70 focus:ring-red-500/40 focus:border-red-500' : ''}`}
+                placeholder="98765 43210"
+                value={form.contactNumber}
+                onChange={setPhone}
+              />
+            </div>
+            {phoneError && (
+              <p className="mt-1.5 text-xs text-red-400 flex items-center gap-1">
+                <span>⚠</span> {phoneError}
+              </p>
+            )}
+            {form.contactNumber.length === 10 && !phoneError && (
+              <p className="mt-1.5 text-xs text-emerald-400">✓ Valid Indian mobile number</p>
+            )}
           </div>
         </div>
 
@@ -214,48 +252,7 @@ export default function SuperAdminDashboard() {
     navigate('/admin-login', { replace: true });
   };
 
-  const [fixingCounts, setFixingCounts] = useState(false);
-  const [fixResult, setFixResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleFixCounts = async () => {
-    setFixingCounts(true);
-    setFixResult(null);
-    try {
-      const res = await apiClient.post('/patient-data', { action: 'fixClinicCounts' });
-      const data = res.data?.body ? JSON.parse(res.data.body) : res.data;
-      if (data.success) {
-        setFixResult({ type: 'success', text: data.message });
-        fetchClinics(); // Refresh to show updated counts
-      } else {
-        setFixResult({ type: 'error', text: data.error || 'Fix failed.' });
-      }
-    } catch (err: any) {
-      setFixResult({ type: 'error', text: err.message });
-    } finally {
-      setFixingCounts(false);
-    }
-  };
-
-  const [syncingStaff, setSyncingStaff] = useState(false);
-
-  const handleSyncLegacyStaff = async () => {
-    if (!window.confirm("This will migrate all unstructured Cognito users into the DynamoDB ClinicStaff table. Proceed?")) return;
-    setSyncingStaff(true);
-    setFixResult(null);
-    try {
-      const res = await apiClient.post('/patient-data', { action: 'syncLegacyStaffToDynamo' });
-      const data = res.data?.body ? JSON.parse(res.data.body) : res.data;
-      if (data.success) {
-        setFixResult({ type: 'success', text: data.message });
-      } else {
-        setFixResult({ type: 'error', text: data.error || 'Sync failed.' });
-      }
-    } catch (err: any) {
-      setFixResult({ type: 'error', text: err.message });
-    } finally {
-      setSyncingStaff(false);
-    }
-  };
 
   const fetchClinics = useCallback(async () => {
     setLoadingClinics(true);
@@ -308,28 +305,6 @@ export default function SuperAdminDashboard() {
               Refresh
             </button>
             <button
-              onClick={handleFixCounts}
-              disabled={fixingCounts}
-              title="Fix missing doctorCount/assistantCount on legacy clinic records"
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-950/60 border border-amber-800/50 text-amber-400 hover:text-amber-300 hover:border-amber-700 text-sm transition-all disabled:opacity-50"
-            >
-              {fixingCounts
-                ? <div className="w-3.5 h-3.5 border border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
-                : <Wrench size={14} />}
-              {fixingCounts ? 'Fixing…' : 'Fix Counts'}
-            </button>
-            <button
-              onClick={handleSyncLegacyStaff}
-              disabled={syncingStaff}
-              title="Migrate legacy Cognito users into the DynamoDB Staff table"
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-950/60 border border-blue-800/50 text-blue-400 hover:text-blue-300 hover:border-blue-700 text-sm transition-all disabled:opacity-50"
-            >
-              {syncingStaff
-                ? <div className="w-3.5 h-3.5 border border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
-                : <Database size={14} />}
-              {syncingStaff ? 'Syncing DB…' : 'Sync Staff DB'}
-            </button>
-            <button
               onClick={handleLogout}
               disabled={loggingOut}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-950/60 border border-red-800/50 text-red-400 hover:text-red-300 hover:border-red-700 text-sm transition-all disabled:opacity-50"
@@ -341,18 +316,6 @@ export default function SuperAdminDashboard() {
             </button>
           </div>
         </div>
-
-        {/* Fix counts result banner */}
-        {fixResult && (
-          <div className={`mb-4 p-3 rounded-xl text-sm border flex items-center justify-between ${
-            fixResult.type === 'success'
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-              : 'bg-red-500/10 border-red-500/30 text-red-300'
-          }`}>
-            <span>{fixResult.text}</span>
-            <button onClick={() => setFixResult(null)} className="ml-4 opacity-60 hover:opacity-100 text-xs">×</button>
-          </div>
-        )}
 
         {/* ── Platform Stats ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
