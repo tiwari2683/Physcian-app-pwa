@@ -40,7 +40,7 @@ export const ForceChangePasswordScreen = () => {
     const ok = await completeNewPassword(newPassword);
     if (ok) {
       setSuccess(true);
-      setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
+      setTimeout(() => navigate('/', { replace: true }), 1500); // RoleRedirector sends to correct dashboard
     }
   };
 

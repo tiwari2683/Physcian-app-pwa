@@ -15,9 +15,12 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use(
   async (config) => {
     try {
-      const token = await authService.getCurrentSessionToken();
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`;
+      // 1. Get the raw JWT token string directly
+      const tokenString = await authService.getCurrentSessionToken();
+
+      if (tokenString && config.headers) {
+        // 2. Send as 'Bearer <token>' — required by the Cognito User Pool Authorizer on API Gateway
+        config.headers.Authorization = `Bearer ${tokenString}`;
       }
     } catch (error) {
       // If token fetch fails (e.g., user logged out), let the request proceed 

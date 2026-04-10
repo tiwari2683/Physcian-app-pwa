@@ -99,6 +99,29 @@ export const authService = {
     throw new Error('Failed to complete password change challenge.');
   },
 
+  getCurrentUser: async (): Promise<User> => {
+    const session = await fetchAuthSession();
+
+    if (!session.tokens?.idToken) {
+      throw new Error('No active session found.');
+    }
+
+    const attributes = await fetchUserAttributes();
+    const role = attributes['custom:role'] as 'SuperAdmin' | 'Doctor' | 'Assistant';
+    const tenantId = attributes['custom:tenant_id'];
+
+    const user: User = {
+      email: attributes.email || '',
+      sub: attributes.sub || '',
+      name: attributes.name || attributes.preferred_username || '',
+      role: role,
+      tenantId: tenantId, 
+      jwtToken: session.tokens.idToken.toString()
+    };
+
+    return user;
+  },
+
   // ✅ FIXED: Returns the raw JWT string so apiClient can use it directly
   // Previously returned a User object, causing "Bearer [object Object]" to be sent
   getCurrentSessionToken: async (): Promise<string> => {

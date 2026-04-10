@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { store } from './controllers/store';
-import { DebugAuth } from './components/DebugAuth';
+// import { DebugAuth } from './components/DebugAuth';
 import { AppRouter } from './routes/AppRouter';
 import { useAuth } from './controllers/hooks/useAuth';
 
@@ -24,7 +24,7 @@ function App() {
       <AuthInitializer>
         <Toaster position="top-center" />
         <AppRouter />
-        <DebugAuth />
+        {/* <DebugAuth /> */}
       </AuthInitializer>
     </Provider>
   );

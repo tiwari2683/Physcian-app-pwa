@@ -10,7 +10,7 @@ export const useAuth = () => {
   const checkSession = useCallback(async () => {
     dispatch(setLoading(true));
     try {
-      const user = await authService.getCurrentSessionToken();
+      const user = await authService.getCurrentUser();
       dispatch(setCredentials(user));
     } catch (err: any) {
       console.log('Session check failed or user needs to log in:', err.message);

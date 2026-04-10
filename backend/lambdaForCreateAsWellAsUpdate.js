@@ -3,7 +3,7 @@ import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCom
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
-import { CognitoIdentityProviderClient, AdminCreateUserCommand } from "@aws-sdk/client-cognito-identity-provider";
+import { CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand, ListUsersCommand } from "@aws-sdk/client-cognito-identity-provider";
 const cognitoClient = new CognitoIdentityProviderClient({ region: "us-east-2" });
 const USER_POOL_ID = process.env.USER_POOL_ID;
 
@@ -21,6 +21,7 @@ const s3 = new S3Client({
 
 // Table names
 const CLINICS_TABLE = process.env.CLINICS_TABLE || 'Clinics';
+const CLINIC_STAFF_TABLE = process.env.CLINIC_STAFF_TABLE || 'ClinicStaff';
 const PATIENTS_TABLE = process.env.PATIENTS_TABLE || 'Patients';
 const VISITS_TABLE = process.env.VISITS_TABLE || 'Visits';
 const APPOINTMENTS_TABLE = process.env.APPOINTMENTS_TABLE || 'Appointments';
@@ -640,6 +641,12 @@ export const handler = async (event, context) => {
         // ============================================================
         switch (action) {
             case 'onboardClinic': return await onboardClinic(requestData);
+            case 'getAllClinics': return await getAllClinics(requestData);
+            case 'resendDoctorInvite': return await resendDoctorInvite(requestData);
+            case 'addStaffToClinic': return await addStaffToClinic(requestData);
+            case 'fixClinicCounts': return await fixClinicCounts(requestData);
+            case 'getClinicStaff': return await getClinicStaff(requestData);
+            case 'syncLegacyStaffToDynamo': return await syncLegacyStaffToDynamo(requestData);
             case 'getPatientHistory': return await getPatientHistory(requestData);
             case 'getPresignedUploadUrl': return await generatePresignedUploadUrl(requestData);
             case 'validateRegistration': return await validateRegistration(requestData);
@@ -2280,19 +2287,26 @@ async function onboardClinic(requestData) {
         const expiryDate = new Date();
         expiryDate.setFullYear(expiryDate.getFullYear() + 1);
 
-        // 3. Save Clinic to DynamoDB
+        // 3. Save Clinic to DynamoDB (including address, contactNumber, and initial staff counts)
+        const { address = '', contactNumber = '' } = requestData;
         await dynamodb.send(new PutCommand({
             TableName: CLINICS_TABLE,
             Item: {
                 tenant_id: newTenantId,
                 clinic_name: clinicName,
+                address: address.trim(),
+                contactNumber: contactNumber.trim(),
                 subscription_expiry: expiryDate.toISOString(),
                 status: 'ACTIVE',
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                // Option B: store staff counters directly on the clinic record
+                doctorCount: 1,        // The admin Doctor being created right now
+                assistantCount: 0      // No assistants yet
             }
         }));
 
         // 4. Provision the Doctor in AWS Cognito
+        // DesiredDeliveryMediums: ['EMAIL'] sends a welcome email with temp credentials
         const createUserCommand = new AdminCreateUserCommand({
             UserPoolId: USER_POOL_ID,
             Username: adminEmail.trim().toLowerCase(),
@@ -2303,20 +2317,454 @@ async function onboardClinic(requestData) {
                 { Name: 'custom:role', Value: 'Doctor' },
                 { Name: 'custom:tenant_id', Value: newTenantId }
             ],
-            DesiredDeliveryMediums: ['EMAIL'],
-            MessageAction: 'SUPPRESS' // Remove this line if you want AWS to actually send the email instantly
+            DesiredDeliveryMediums: ['EMAIL']
+            // MessageAction: 'SUPPRESS' removed — Doctor must receive welcome email with temp password
         });
 
-        await cognitoClient.send(createUserCommand);
+        const cognitoResponse = await cognitoClient.send(createUserCommand);
         console.log(`✅ Provisioned Doctor account for ${adminEmail}`);
+        console.log(`📧 Temporary credentials sent to: ${adminEmail}`);
 
         return formatSuccessResponse({
             success: true,
             tenant_id: newTenantId,
-            message: `Clinic ${clinicName} successfully created and Doctor account provisioned.`
+            doctorUsername: cognitoResponse.User?.Username,
+            message: `Clinic '${clinicName}' created. Doctor account provisioned and temporary credentials sent to ${adminEmail}.`
         });
     } catch (error) {
         console.error('❌ Error onboarding clinic:', error);
         return formatErrorResponse(`Failed to onboard clinic: ${error.message}`);
+    }
+}
+
+// ============================================
+// SUPERADMIN: GET ALL CLINICS WITH STATS
+// ============================================
+
+/**
+ * Counts patients belonging to a specific tenant using the GSI.
+ * Uses SELECT COUNT for efficiency (no data fetched, just count).
+ */
+async function countPatientsByTenant(tenantId) {
+    if (!tenantId) return 0;
+    try {
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: PATIENTS_TABLE,
+            IndexName: PATIENT_TENANT_INDEX,
+            KeyConditionExpression: 'tenant_id = :tid',
+            ExpressionAttributeValues: { ':tid': tenantId },
+            Select: 'COUNT'
+        }));
+        return result.Count || 0;
+    } catch (e) {
+        console.warn(`⚠️ Could not count patients for ${tenantId}: ${e.message}`);
+        return 0;
+    }
+}
+
+/**
+ * Returns all clinics from the Clinics table, enriched with live patient count.
+ * Staff counts (doctorCount, assistantCount) are stored directly on clinic record (Option B).
+ * ONLY accessible by SuperAdmins.
+ */
+async function getAllClinics(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    try {
+        console.log('🏢 SuperAdmin: fetching all clinics...');
+
+        const clinicsResult = await dynamodb.send(new ScanCommand({ TableName: CLINICS_TABLE }));
+        const clinics = clinicsResult.Items || [];
+
+        console.log(`📋 Found ${clinics.length} clinics. Enriching with patient counts...`);
+
+        // Fetch patient counts concurrently for all clinics
+        const enriched = await Promise.all(
+            clinics.map(async (clinic) => ({
+                ...clinic,
+                patientCount: await countPatientsByTenant(clinic.tenant_id)
+            }))
+        );
+
+        // Sort by createdAt descending (newest first)
+        enriched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        console.log('✅ Clinics enriched successfully.');
+
+        return formatSuccessResponse({
+            success: true,
+            clinics: enriched,
+            count: enriched.length
+        });
+    } catch (error) {
+        console.error('❌ Error fetching all clinics:', error);
+        return formatErrorResponse(`Failed to fetch clinics: ${error.message}`);
+    }
+}
+
+// ============================================
+// SUPERADMIN: RESEND DOCTOR INVITE / RESET PASSWORD
+// ============================================
+
+/**
+ * Resends a Cognito invitation email to a Doctor/Assistant with a fresh temporary password.
+ * Workflow:
+ *   1. Tries RESEND (user must be in FORCE_CHANGE_PASSWORD state) — sends a new temp password.
+ *   2. If the user is already CONFIRMED (already set their password), falls back to
+ *      AdminSetUserPassword (Permanent: false) so they can log in again with a known temp password.
+ * ONLY accessible by SuperAdmins.
+ */
+async function resendDoctorInvite(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    const { doctorEmail } = requestData;
+    if (!doctorEmail || !USER_POOL_ID) {
+        return formatErrorResponse('Missing doctorEmail or USER_POOL_ID environment variable.');
+    }
+
+    const username = doctorEmail.trim().toLowerCase();
+    console.log(`📧 SuperAdmin: resending invite for ${username}`);
+
+    try {
+        // Step 1: Try RESEND — only works if user is in FORCE_CHANGE_PASSWORD state
+        await cognitoClient.send(new AdminCreateUserCommand({
+            UserPoolId: USER_POOL_ID,
+            Username: username,
+            MessageAction: 'RESEND',
+            DesiredDeliveryMediums: ['EMAIL']
+        }));
+
+        console.log(`✅ Invite resent to ${username} via RESEND`);
+        return formatSuccessResponse({
+            success: true,
+            message: `A new temporary password has been emailed to ${doctorEmail}. They can log in and will be prompted to set a permanent password.`
+        });
+
+    } catch (resendError) {
+        // If user is CONFIRMED (already has a permanent password), RESEND fails.
+        // Fall back to AdminSetUserPassword to force a new temp password.
+        if (resendError.name === 'InvalidParameterException' || resendError.name === 'NotAuthorizedException') {
+            console.warn(`⚠️ RESEND not applicable (user may be CONFIRMED). Falling back to AdminSetUserPassword...`);
+
+            try {
+                // Generate a predictable but secure temp password: Doctor@<4 random digits>
+                const tempPassword = `Doctor@${Math.floor(1000 + Math.random() * 9000)}`;
+
+                await cognitoClient.send(new AdminSetUserPasswordCommand({
+                    UserPoolId: USER_POOL_ID,
+                    Username: username,
+                    Password: tempPassword,
+                    Permanent: false  // Forces FORCE_CHANGE_PASSWORD status again
+                }));
+
+                console.log(`✅ Temp password reset for ${username}: ${tempPassword}`);
+                return formatSuccessResponse({
+                    success: true,
+                    tempPassword,  // Return to SuperAdmin so they can communicate it
+                    message: `Password reset. Share this temporary password with the Doctor: ${tempPassword}. They will be forced to change it on first login.`
+                });
+
+            } catch (setError) {
+                console.error('❌ AdminSetUserPassword failed:', setError);
+                return formatErrorResponse(`Failed to reset password: ${setError.message}`);
+            }
+        }
+
+        console.error('❌ Error resending invite:', resendError);
+        return formatErrorResponse(`Failed to resend invite: ${resendError.message}`);
+    }
+}
+
+// ============================================
+// SUPERADMIN: ADD STAFF (DOCTOR/ASSISTANT) TO EXISTING CLINIC
+// ============================================
+
+/**
+ * Provisions a new Doctor or Assistant for an already-registered clinic.
+ * 1. Validates clinic exists.
+ * 2. Creates Cognito user with correct role + tenant_id.
+ * 3. Atomically increments doctorCount or assistantCount on the Clinics table.
+ * ONLY accessible by SuperAdmins.
+ */
+async function addStaffToClinic(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    const { clinicId, staffEmail, staffName, staffRole } = requestData;
+
+    if (!clinicId || !staffEmail || !staffRole || !USER_POOL_ID) {
+        return formatErrorResponse('Missing required fields: clinicId, staffEmail, staffRole, or USER_POOL_ID.');
+    }
+    if (!['Doctor', 'Assistant'].includes(staffRole)) {
+        return formatErrorResponse("Invalid staffRole. Must be 'Doctor' or 'Assistant'.");
+    }
+
+    const username = staffEmail.trim().toLowerCase();
+    console.log(`➕ Adding ${staffRole} (${username}) to clinic ${clinicId}`);
+
+    // 1. Verify clinic exists
+    const clinicResult = await dynamodb.send(new GetCommand({
+        TableName: CLINICS_TABLE,
+        Key: { tenant_id: clinicId }
+    }));
+    if (!clinicResult.Item) {
+        return formatErrorResponse(`Clinic with ID '${clinicId}' not found.`);
+    }
+    const clinicName = clinicResult.Item.clinic_name;
+
+    try {
+        // 2. Create user in Cognito
+        await cognitoClient.send(new AdminCreateUserCommand({
+            UserPoolId: USER_POOL_ID,
+            Username: username,
+            UserAttributes: [
+                { Name: 'email', Value: username },
+                { Name: 'email_verified', Value: 'true' },
+                { Name: 'name', Value: staffName?.trim() || staffRole },
+                { Name: 'custom:role', Value: staffRole },
+                { Name: 'custom:tenant_id', Value: clinicId }
+            ],
+            DesiredDeliveryMediums: ['EMAIL']
+        }));
+        console.log(`✅ Cognito user created for ${username} as ${staffRole}`);
+
+        // 2.5 Also write to ClinicStaff DynamoDB Table
+        await dynamodb.send(new PutCommand({
+            TableName: CLINIC_STAFF_TABLE,
+            Item: {
+                tenant_id: clinicId,
+                email: username,
+                name: staffName?.trim() || staffRole,
+                role: staffRole,
+                status: 'FORCE_CHANGE_PASSWORD',
+                enabled: true,
+                createdAt: new Date().toISOString()
+            }
+        }));
+        console.log(`✅ DynamoDB Staff profile created for ${username}`);
+
+        // 3. Increment count — if_not_exists handles legacy clinics (Cl 1 fix)
+        const countField = staffRole === 'Doctor' ? 'doctorCount' : 'assistantCount';
+        await dynamodb.send(new UpdateCommand({
+            TableName: CLINICS_TABLE,
+            Key: { tenant_id: clinicId },
+            UpdateExpression: `SET ${countField} = if_not_exists(${countField}, :zero) + :inc`,
+            ExpressionAttributeValues: { ':zero': 0, ':inc': 1 }
+        }));
+        console.log(`📊 ${countField} incremented for clinic ${clinicId}`);
+
+        return formatSuccessResponse({
+            success: true,
+            message: `${staffRole} '${staffName}' added to '${clinicName}'. Invite email sent to ${staffEmail}.`
+        });
+
+    } catch (error) {
+        if (error.name === 'UsernameExistsException') {
+            return formatErrorResponse(`A user with email '${staffEmail}' already exists in Cognito. Use 'Resend Invite' if they need a new password.`);
+        }
+        console.error('❌ Error adding staff:', error);
+        return formatErrorResponse(`Failed to add staff: ${error.message}`);
+    }
+}
+
+// ============================================
+// SUPERADMIN: FIX LEGACY CLINIC COUNTS (ONE-TIME MAINTENANCE)
+// ============================================
+
+/**
+ * Patches all clinic records that are missing doctorCount or assistantCount.
+ * Sets doctorCount = 1 (at least the initial admin doctor) and assistantCount = 0.
+ * Safe to run multiple times — only updates records that are missing these fields.
+ * ONLY accessible by SuperAdmins.
+ */
+async function fixClinicCounts(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    try {
+        const clinicsResult = await dynamodb.send(new ScanCommand({ TableName: CLINICS_TABLE }));
+        const clinics = clinicsResult.Items || [];
+
+        const needsFix = clinics.filter(c => c.doctorCount === undefined || c.assistantCount === undefined);
+        console.log(`🔧 Found ${needsFix.length} clinics needing count fix.`);
+
+        if (needsFix.length === 0) {
+            return formatSuccessResponse({ success: true, message: 'All clinics already have correct count fields. No changes needed.' });
+        }
+
+        await Promise.all(needsFix.map(clinic =>
+            dynamodb.send(new UpdateCommand({
+                TableName: CLINICS_TABLE,
+                Key: { tenant_id: clinic.tenant_id },
+                // Only set if NOT already present — safe to call multiple times
+                UpdateExpression: 'SET doctorCount = if_not_exists(doctorCount, :d), assistantCount = if_not_exists(assistantCount, :a)',
+                ExpressionAttributeValues: { ':d': 1, ':a': 0 }
+            }))
+        ));
+
+        console.log(`✅ Fixed count fields for ${needsFix.length} clinics.`);
+        return formatSuccessResponse({
+            success: true,
+            fixed: needsFix.map(c => c.clinic_name),
+            message: `Fixed count fields for ${needsFix.length} clinic(s): ${needsFix.map(c => c.clinic_name).join(', ')}.`
+        });
+    } catch (error) {
+        console.error('❌ fixClinicCounts error:', error);
+        return formatErrorResponse(`Fix failed: ${error.message}`);
+    }
+}
+
+// ============================================
+// SUPERADMIN: GET STAFF LIST FOR A CLINIC
+// ============================================
+
+/**
+ * Returns all Doctors and Assistants registered under a specific clinic (tenant_id).
+ * Uses DynamoDB Query for O(1) instantaneous lookup.
+ * ONLY accessible by SuperAdmins.
+ */
+async function getClinicStaff(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    const { clinicId } = requestData;
+    if (!clinicId) {
+        return formatErrorResponse('Missing clinicId.');
+    }
+
+    console.log(`🔍 Fetching staff for clinic from DynamoDB: ${clinicId}`);
+
+    try {
+        const response = await dynamodb.send(new QueryCommand({
+            TableName: CLINIC_STAFF_TABLE,
+            KeyConditionExpression: 'tenant_id = :tid',
+            ExpressionAttributeValues: {
+                ':tid': clinicId
+            }
+        }));
+
+        let allStaff = response.Items || [];
+
+        // Sort: Doctors first, then Assistants, then alphabetically by name
+        allStaff.sort((a, b) => {
+            if (a.role !== b.role) return a.role === 'Doctor' ? -1 : 1;
+            return (a.name || '').localeCompare(b.name || '');
+        });
+
+        console.log(`✅ Found ${allStaff.length} staff members for clinic ${clinicId}`);
+        return formatSuccessResponse({ success: true, staff: allStaff });
+
+    } catch (error) {
+        console.error('❌ getClinicStaff error:', error);
+        return formatErrorResponse(`Failed to fetch staff from DB: ${error.message}`);
+    }
+}
+
+// ============================================
+// SUPERADMIN: SYNC LEGACY STAFF TO DYNAMODB
+// ============================================
+
+/**
+ * Sweeps the entire Cognito user pool, finds Doctors and Assistants, 
+ * and inserts/upserts them into the ClinicStaff DynamoDB table.
+ * ONLY accessible by SuperAdmins.
+ */
+async function syncLegacyStaffToDynamo(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    if (!USER_POOL_ID) {
+        return formatErrorResponse('Missing USER_POOL_ID environment variable.');
+    }
+
+    console.log(`🔄 Syncing legacy staff from Cognito to DynamoDB`);
+
+    try {
+        let syncedCount = 0;
+        let paginationToken;
+
+        // Paginate through all Cognito users
+        do {
+            const response = await cognitoClient.send(new ListUsersCommand({
+                UserPoolId: USER_POOL_ID,
+                Limit: 60,
+                ...(paginationToken ? { PaginationToken: paginationToken } : {})
+            }));
+
+            const users = response.Users || [];
+            for (const user of users) {
+                const attrs = {};
+                (user.Attributes || []).forEach(a => { attrs[a.Name] = a.Value; });
+
+                const tenantId = attrs['custom:tenant_id'];
+                const role = attrs['custom:role'];
+                const email = attrs['email'] || user.Username;
+
+                if (!tenantId || !role) continue; // Skip superadmins or malformed
+                
+                // Only sync Doctors and Assistants
+                if (role === 'Doctor' || role === 'Assistant') {
+                    await dynamodb.send(new PutCommand({
+                        TableName: CLINIC_STAFF_TABLE,
+                        Item: {
+                            tenant_id: tenantId,
+                            email: email,
+                            username: user.Username,
+                            name: attrs.name || 'Unknown',
+                            role: role,
+                            status: user.UserStatus,
+                            enabled: user.Enabled,
+                            createdAt: user.UserCreateDate ? new Date(user.UserCreateDate).toISOString() : new Date().toISOString()
+                        }
+                    }));
+                    syncedCount++;
+                }
+            }
+
+            paginationToken = response.PaginationToken;
+        } while (paginationToken);
+
+        console.log(`✅ Legacy sync complete. Migrated ${syncedCount} staff profiles.`);
+        return formatSuccessResponse({ 
+            success: true, 
+            message: `Successfully migrated ${syncedCount} staff members from Cognito to DynamoDB.`,
+            syncedCount
+        });
+
+    } catch (error) {
+        console.error('❌ syncLegacyStaffToDynamo error:', error);
+        return formatErrorResponse(`Failed to sync legacy staff: ${error.message}`);
     }
 }
