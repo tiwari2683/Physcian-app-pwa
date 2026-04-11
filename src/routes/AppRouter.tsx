@@ -3,12 +3,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RoleRoute } from './RoleRoute';
 import { LoginScreen } from '../views/Auth/LoginScreen';
-import { SuperAdminLoginScreen } from '../views/Auth/SuperAdminLoginScreen';
 import { ForgotPasswordScreen } from '../views/Auth/ForgotPasswordScreen';
 import { ForceChangePasswordScreen } from '../views/Auth/ForceChangePasswordScreen';
 import { useAppSelector } from '../controllers/hooks/hooks';
-import SuperAdminDashboard from '../views/SuperAdmin/Dashboard/SuperAdminDashboard';
-import ClinicDetailPage from '../views/SuperAdmin/Clinic/ClinicDetailPage';
 
 // 1. Lazy Load the Sub-Apps for Code Splitting
 const DoctorRoutes = lazy(() => import('./DoctorRoutes'));
@@ -28,7 +25,6 @@ const RoleRedirector = () => {
   
   if (user?.role === 'Doctor') return <Navigate to="/doctor/dashboard" replace />;
   if (user?.role === 'Assistant') return <Navigate to="/assistant/dashboard" replace />;
-  if (user?.role === 'SuperAdmin') return <Navigate to="/superadmin/dashboard" replace />;
   // Fallback if role is unassigned or invalid
   return <Navigate to="/login" replace />;
 };
@@ -39,7 +35,6 @@ export const AppRouter = () => {
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<LoginScreen />} />
-        <Route path="/admin-login" element={<SuperAdminLoginScreen />} />
         <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
         <Route path="/change-password" element={<ForceChangePasswordScreen />} />
 
@@ -67,11 +62,7 @@ export const AppRouter = () => {
             } />
           </Route>
 
-          {/* SuperAdmin Sandbox (Role Guard) */}
-          <Route element={<RoleRoute allowedRole="SuperAdmin" />}>
-            <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
-            <Route path="/superadmin/clinic/:clinicId" element={<ClinicDetailPage />} />
-          </Route>
+
 
           {/* Catch-all for authenticated users: redirect back to root for sort-out */}
           <Route path="*" element={<Navigate to="/" replace />} />

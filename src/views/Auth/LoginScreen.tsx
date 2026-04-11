@@ -90,12 +90,7 @@ export const LoginScreen = () => {
           </button>
         </form>
         
-        {/* Admin Link at the bottom */}
-        <div className="mt-8 text-center border-t border-gray-100 pt-6">
-          <Link to="/admin-login" className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
-            SuperAdmin Portal Access
-          </Link>
-        </div>
+
       </div>
     </div>
   );

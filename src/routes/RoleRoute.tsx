@@ -2,7 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAppSelector } from '../controllers/hooks/hooks';
 
 interface RoleRouteProps {
-  allowedRole: 'Doctor' | 'Assistant' | 'SuperAdmin';
+  allowedRole: 'Doctor' | 'Assistant';
 }
 
 export const RoleRoute = ({ allowedRole }: RoleRouteProps) => {
