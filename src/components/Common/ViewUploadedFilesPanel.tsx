@@ -87,7 +87,7 @@ export const ViewUploadedFilesPanel: React.FC<Props> = ({
 
   // ── Fetch historical S3 files whenever panel opens ──────────────────────────
   const fetchS3Files = async () => {
-    if (!patientId || patientId.startsWith('draft_')) {
+    if (!patientId || patientId === 'undefined' || patientId === 'null' || patientId.startsWith('draft_') || patientId.startsWith('checkin_')) {
       setS3Files([]);
       return;
     }

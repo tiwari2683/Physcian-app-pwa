@@ -16,11 +16,24 @@ export type LoginResult =
   | { type: 'NEW_PASSWORD_REQUIRED' };
 
 export const authService = {
-  login: async (email: string, password: string): Promise<LoginResult> => {
-    const { nextStep, isSignedIn } = await signIn({
-      username: email,
-      password: password,
-    });
+  login: async (email: string, password: string, isRetry = false): Promise<LoginResult> => {
+    let signInResult;
+    
+    try {
+      signInResult = await signIn({
+        username: email,
+        password: password,
+      });
+    } catch (error: any) {
+      if (!isRetry && error?.message && error.message.includes('already a signed in user')) {
+        console.warn('Ghost session detected from another portal. Clearing session and retrying...');
+        await signOut();
+        return authService.login(email, password, true);
+      }
+      throw error;
+    }
+
+    const { nextStep, isSignedIn } = signInResult;
 
     if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
       return { type: 'NEW_PASSWORD_REQUIRED' };

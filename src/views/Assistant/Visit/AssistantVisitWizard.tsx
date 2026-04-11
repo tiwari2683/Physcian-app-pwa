@@ -39,7 +39,7 @@ const TABS = [
 ];
 
 const isLocalDraftId = (id: string | null | undefined): boolean => {
-    if (!id) return false;
+    if (!id || id === 'undefined' || id === 'null') return true; // Treat explicitly broken IDs as local/draft so they don't hit the cloud
     return id.startsWith('draft_') || id.startsWith('checkin_');
 };
 

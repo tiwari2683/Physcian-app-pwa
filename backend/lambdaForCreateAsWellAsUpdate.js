@@ -50,6 +50,47 @@ const ENFORCE_BILLING = process.env.ENFORCE_BILLING === 'true'; // Set to false 
  * Generate presigned URL for direct file upload from frontend
  * This eliminates Base64 encoding entirely
  */
+/**
+ * Generate a short-lived presigned URL to view/download a file from S3 securely.
+ */
+async function generatePresignedGetUrl(requestData) {
+    try {
+        const { s3Key, tenantId, userRole } = requestData;
+
+        if (!s3Key) {
+            return formatErrorResponse("Missing s3Key");
+        }
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // Validate that the requested file belongs to the user's tenant
+        // ============================================
+        if (userRole !== 'SuperAdmin' && !s3Key.startsWith(`${tenantId}/`)) {
+            console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to access file ${s3Key}`);
+            return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+        }
+
+        console.log(`📥 Generating presigned GET URL for: ${s3Key}`);
+
+        const command = new GetObjectCommand({
+            Bucket: REPORTS_BUCKET,
+            Key: s3Key
+        });
+
+        // 5-minute expiration
+        const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+
+        return formatSuccessResponse({
+            success: true,
+            url: presignedUrl,
+            expiresIn: 300
+        });
+    } catch (error) {
+        console.error('❌ Error generating presigned GET URL:', error);
+        return formatErrorResponse(`Failed to generate GET URL: ${error.message}`);
+    }
+}
+
 async function generatePresignedUploadUrl(requestData) {
     try {
         const { patientId, fileName, fileType, category = 'uncategorized', tenantId } = requestData;
@@ -342,7 +383,7 @@ async function handleGetPatient(requestData) {
                 medicalHistory: medicalHistoryData.medicalHistory || [],
                 diagnosisHistory: diagnosisHistoryData.diagnosisHistory || [],
                 investigationsHistory: investigationsHistoryData.investigationsHistory || [],
-                freshData: forceRefresh,
+                freshData: true,
                 activeVisit: activeVisit
             })
         };
@@ -695,6 +736,7 @@ export const handler = async (event, context) => {
             case 'syncLegacyStaffToDynamo': return await syncLegacyStaffToDynamo(requestData);
             case 'getPatientHistory': return await getPatientHistory(requestData);
             case 'getPresignedUploadUrl': return await generatePresignedUploadUrl(requestData);
+            case 'getPresignedGetUrl': return await generatePresignedGetUrl(requestData);
             case 'validateRegistration': return await validateRegistration(requestData);
             case 'confirmFileUpload': return await confirmFileUpload(requestData);
             case 'getPatient': return await handleGetPatient(requestData);
@@ -702,6 +744,7 @@ export const handler = async (event, context) => {
             case 'deletePatientFile': return await deletePatientFile(requestData);
             case 'initiateVisit': return await initiateVisit(requestData);
             case 'getActiveVisit': return await getActiveVisit(requestData);
+            case 'getAllPatientVisits': return await getAllPatientVisits(requestData);
             case 'updateVisit': return await updateVisit(requestData);
             case 'completeVisit': return await completeVisit(requestData);
             case 'updateVisitStatus': return await updateVisitStatus(requestData);
@@ -1855,6 +1898,55 @@ async function handleGetWaitingRoom(requestData) {
     } catch (error) {
         console.error('ERROR getting waiting room:', error);
         return formatErrorResponse(`Failed to get waiting room: ${error.message}`, error);
+    }
+}
+
+async function getAllPatientVisits(requestData) {
+    try {
+        const { patientId, tenantId, userRole } = requestData;
+        if (!patientId) return formatErrorResponse("Missing patientId");
+
+        console.log(`🔍 Getting all historical visits for patient: ${patientId}`);
+
+        // Query the GSI using only the Partition Key (patientId) to fetch all statuses
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: VISITS_TABLE,
+            IndexName: 'patientId-status-index',
+            KeyConditionExpression: 'patientId = :pid',
+            ExpressionAttributeValues: { ':pid': patientId }
+        }));
+
+        let visits = result.Items || [];
+
+        // ============================================
+        // ZERO-TRUST TENANT CHECK
+        // ============================================
+        if (visits.length > 0) {
+            const sampleVisit = visits[0];
+            if (sampleVisit.tenant_id && sampleVisit.tenant_id !== tenantId && userRole !== 'SuperAdmin') {
+                console.error(`🚨 SECURITY BLOCK: Tenant ${tenantId} attempted to get visits from ${sampleVisit.tenant_id}`);
+                return formatErrorResponse("Forbidden: Cross-tenant data access blocked", 403);
+            }
+        }
+
+        // Sort dynamically from newest to oldest based on creation
+        visits.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Enrich all embedded report files across all historical visits
+        const enrichedVisits = await Promise.all(visits.map(async (visit) => {
+            if (visit.reportFiles && Array.isArray(visit.reportFiles) && visit.reportFiles.length > 0) {
+                visit.reportFiles = await enrichPatientFilesWithSignedUrls(visit.reportFiles);
+            }
+            return visit;
+        }));
+
+        return formatSuccessResponse({
+            success: true,
+            visits: enrichedVisits
+        });
+    } catch (error) {
+        console.error('❌ Error getting all patient visits:', error);
+        return formatErrorResponse(`Failed to fetch patient visits: ${error.message}`);
     }
 }
 

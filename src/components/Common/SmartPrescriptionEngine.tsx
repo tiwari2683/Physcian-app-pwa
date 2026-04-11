@@ -234,7 +234,25 @@ export const SmartPrescriptionEngine: React.FC<SmartPrescriptionEngineProps> = (
     if (!patientId) return;
     const fetchRecords = async () => {
         try {
-            const records = await patientService.getPatientPrescriptions(patientId);
+            const [prescriptions, visits] = await Promise.all([
+                patientService.getPatientPrescriptions(patientId),
+                patientService.getAllPatientVisits(patientId)
+            ]);
+            
+            const visitPrescriptions = visits
+                .filter(v => v.medications && v.medications.length > 0)
+                .map(v => ({
+                    ...v,
+                    prescriptionId: v.prescriptionId || v.visitId || `visit-${v.createdAt}`
+                }));
+
+            const combinedMap = new Map();
+            [...prescriptions, ...visitPrescriptions].forEach(record => {
+               const id = record.prescriptionId || record.visitId || record.createdAt;
+               if (!combinedMap.has(id)) { combinedMap.set(id, record); }
+            });
+
+            const records = Array.from(combinedMap.values());
             const sorted = records.sort((a, b) => {
                 const dateA = a.prescriptionDate || a.visitDate || a.createdAt;
                 const dateB = b.prescriptionDate || b.visitDate || b.createdAt;

@@ -157,7 +157,9 @@ export const patientService = {
       patientId
     });
     const parsed = parseResponse(response.data);
-    return parsed || [];
+    if (!parsed) return [];
+    if (Array.isArray(parsed)) return parsed;
+    return parsed.prescriptions || [];
   },
 
   getAllPatientVisits: async (patientId: string): Promise<any[]> => {
@@ -166,6 +168,8 @@ export const patientService = {
       patientId
     });
     const parsed = parseResponse(response.data);
-    return parsed || [];
+    if (!parsed) return [];
+    if (Array.isArray(parsed)) return parsed;
+    return parsed.visits || parsed.patients || [];
   }
 };
