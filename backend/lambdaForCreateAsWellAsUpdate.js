@@ -686,6 +686,7 @@ export const handler = async (event, context) => {
         // ============================================================
         switch (action) {
             case 'onboardClinic': return await onboardClinic(requestData);
+            case 'renewClinicSubscription': return await renewClinicSubscription(requestData);
             case 'getAllClinics': return await getAllClinics(requestData);
             case 'resendDoctorInvite': return await resendDoctorInvite(requestData);
             case 'addStaffToClinic': return await addStaffToClinic(requestData);
@@ -2460,9 +2461,10 @@ async function onboardClinic(requestData) {
         const newTenantId = `clinic_${randomUUID()}`;
         console.log(`🏢 Onboarding new clinic: ${clinicName} with ID: ${newTenantId}`);
 
-        // 2. Set Subscription Expiry (Default: 1 Year from today)
+        // 2. Set Subscription Expiry based on requested validity (Default: 12 months)
+        const validityMonths = requestData.validityMonths ? parseInt(requestData.validityMonths, 10) : 12;
         const expiryDate = new Date();
-        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+        expiryDate.setMonth(expiryDate.getMonth() + validityMonths);
 
         // 3. Save Clinic to DynamoDB (including address, contactNumber, and initial staff counts)
         const { address = '', contactNumber = '' } = requestData;
@@ -2960,5 +2962,65 @@ async function syncLegacyStaffToDynamo(requestData) {
     } catch (error) {
         console.error('❌ syncLegacyStaffToDynamo error:', error);
         return formatErrorResponse(`Failed to sync legacy staff: ${error.message}`);
+    }
+}
+// ============================================
+// SUPERADMIN: RENEW CLINIC SUBSCRIPTION
+// ============================================
+async function renewClinicSubscription(requestData) {
+    if (requestData.userRole !== 'SuperAdmin') {
+        return {
+            statusCode: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ success: false, error: 'Forbidden: SuperAdmin access required.' })
+        };
+    }
+
+    const { clinicId, validityMonths } = requestData;
+    if (!clinicId || !validityMonths) {
+        return formatErrorResponse('Missing required fields: clinicId, validityMonths');
+    }
+
+    try {
+        const clinicResult = await dynamodb.send(new GetCommand({
+            TableName: CLINICS_TABLE,
+            Key: { tenant_id: clinicId }
+        }));
+
+        if (!clinicResult.Item) {
+            return formatErrorResponse('Clinic not found.', 404);
+        }
+
+        const currentExpiry = new Date(clinicResult.Item.subscription_expiry);
+        
+        let newExpiry = new Date();
+        // If it's already expired, add from today. If it's not expired yet, add from the current expiry.
+        if (currentExpiry > newExpiry) {
+            newExpiry = currentExpiry;
+        }
+        
+        newExpiry.setMonth(newExpiry.getMonth() + parseInt(validityMonths, 10));
+
+        await dynamodb.send(new UpdateCommand({
+            TableName: CLINICS_TABLE,
+            Key: { tenant_id: clinicId },
+            UpdateExpression: 'SET subscription_expiry = :newExpiry, #status = :activeStatus',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: { 
+                ':newExpiry': newExpiry.toISOString(),
+                ':activeStatus': 'ACTIVE'
+            }
+        }));
+
+        console.log(`✅ Clinic ${clinicId} subscription renewed. New expiry: ${newExpiry.toISOString()}`);
+        
+        return formatSuccessResponse({ 
+            success: true, 
+            message: `Subscription extended. New expiry: ${newExpiry.toLocaleDateString()}`
+        });
+
+    } catch (error) {
+        console.error('❌ Error renewing subscription:', error);
+        return formatErrorResponse(`Failed to renew subscription: ${error.message}`);
     }
 }
