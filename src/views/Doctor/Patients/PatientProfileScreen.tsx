@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { patientService } from '../../../services/api/patientService';
 import { generatePrescriptionHTML } from '../../../utils/PrescriptionPdfTemplate';
 import { generateAndSharePrescription } from '../../../utils/PdfGenerator';
-import { ArrowLeft, Share2, Download, AlertCircle, RefreshCw, FileText, Calendar, Clock, Pill, User, Eye, Phone, MapPin, Activity, Stethoscope, CheckCircle, FileScan, Image as ImageIcon, X } from 'lucide-react';
+import { ArrowLeft, Share2, Download, AlertCircle, RefreshCw, FileText, Calendar, Clock, Pill, User, Eye, Phone, MapPin, Activity, Stethoscope, CheckCircle, Image as ImageIcon, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const PatientProfileScreen = () => {
@@ -257,21 +257,15 @@ export const PatientProfileScreen = () => {
                                         <div>
                                             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Most Recent Diagnosis</p>
                                             <p className="text-gray-900 font-medium leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                                {activeVisit?.diagnosis || 'No current diagnosis recorded. Focus on historical records below.'}
+                                                {activeVisit?.diagnosis || (prescriptions.find(p => p.diagnosis)?.diagnosis) || 'No current diagnosis recorded. Focus on historical records below.'}
                                             </p>
                                         </div>
 
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-gray-100">
+                                        <div className="pt-3 border-t border-gray-100">
                                             <div>
-                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1.5"><Stethoscope className="w-3.5 h-3.5" /> Medical History</p>
-                                                <p className="text-gray-700 text-sm font-medium">
-                                                    {activeVisit?.medicalHistory || 'None reported.'}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1.5"><FileScan className="w-3.5 h-3.5" /> Symptoms</p>
-                                                <p className="text-gray-700 text-sm font-medium">
-                                                    {activeVisit?.symptoms || 'None reported.'}
+                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1.5"><Stethoscope className="w-3.5 h-3.5" /> Complaint / Medical History</p>
+                                                <p className="text-gray-700 text-sm font-medium leading-relaxed">
+                                                    {activeVisit?.medicalHistory || (prescriptions.find(p => p.medicalHistory)?.medicalHistory) || 'None reported.'}
                                                 </p>
                                             </div>
                                         </div>
