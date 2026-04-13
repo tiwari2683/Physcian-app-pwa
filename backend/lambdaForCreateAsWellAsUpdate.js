@@ -729,6 +729,7 @@ export const handler = async (event, context) => {
             case 'onboardClinic': return await onboardClinic(requestData);
             case 'renewClinicSubscription': return await renewClinicSubscription(requestData);
             case 'getAllClinics': return await getAllClinics(requestData);
+            case 'getClinicDetails': return await getClinicDetails(requestData);
             case 'resendDoctorInvite': return await resendDoctorInvite(requestData);
             case 'addStaffToClinic': return await addStaffToClinic(requestData);
             case 'fixClinicCounts': return await fixClinicCounts(requestData);
@@ -918,6 +919,39 @@ async function checkClinicSubscription(tenantId) {
         // If DB fails, we fail OPEN during testing, but ideally CLOSE in prod. 
         // We'll return false to trigger the soft gate warning.
         return false;
+    }
+}
+
+/**
+ * Returns clinic metadata (name, subscription_expiry, status) for the
+ * calling user's own tenant. Isolation is guaranteed because tenantId is
+ * always injected from the verified Cognito token — never from the request body.
+ */
+async function getClinicDetails(requestData) {
+    const { tenantId, userRole } = requestData;
+    if (!tenantId && userRole !== 'SuperAdmin') {
+        return formatErrorResponse('Missing clinic ID.');
+    }
+    try {
+        const result = await dynamodb.send(new GetCommand({
+            TableName: CLINICS_TABLE,
+            Key: { tenant_id: tenantId }
+        }));
+        if (!result.Item) {
+            return formatErrorResponse('Clinic record not found.');
+        }
+        // Only expose safe, non-sensitive fields
+        const { clinic_name, subscription_expiry, status, address, contactNumber } = result.Item;
+        return formatSuccessResponse({
+            clinic_name,
+            subscription_expiry,
+            status,
+            address,
+            contactNumber
+        });
+    } catch (error) {
+        console.error('❌ getClinicDetails error:', error);
+        return formatErrorResponse(error.message);
     }
 }
 

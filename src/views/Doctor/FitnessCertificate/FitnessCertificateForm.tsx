@@ -14,6 +14,7 @@ import {
     Stethoscope,
     ClipboardList,
     Star,
+    ShieldOff,
 } from 'lucide-react';
 import { fitnessCertificateService } from '../../../services/api/fitnessCertificateService';
 import { patientService } from '../../../services/api/patientService';
@@ -21,6 +22,7 @@ import type { FitnessCertificateFormData, OpinionType } from '../../../models/Fi
 import { GenerateCertificatePdfModal } from './GenerateCertificatePdfModal';
 import { generatePrescriptionFromMedications } from '../../../utils/FitnessCertificateUtils';
 import { generateChunkedFitnessCertificate } from '../../../utils/FitnessCertificatePdfTemplate';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
 import html2canvas from 'html2canvas';
 
 const SURGERY_FITNESS_OPTIONS = [
@@ -42,6 +44,7 @@ export const FitnessCertificateForm = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const templateData = location.state?.templateData as FitnessCertificateFormData | undefined;
+    const { isExpired } = useSubscription();
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -271,6 +274,10 @@ export const FitnessCertificateForm = () => {
     };
 
     const handleGeneratePdf = async () => {
+        if (isExpired) {
+            alert('Subscription expired. Fitness certificates cannot be generated.');
+            return;
+        }
         const saved = await handleSave();
         if (saved) setIsPdfModalOpen(true);
     };
@@ -391,10 +398,16 @@ export const FitnessCertificateForm = () => {
                             
                             {/* Action Buttons (Moved below Preview) */}
                             <div className="flex flex-col xl:flex-row gap-4 mt-6">
+                                {isExpired && (
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-xs font-bold text-red-700">
+                                        <ShieldOff className="w-4 h-4 shrink-0" />
+                                        Subscription expired — certificate generation is disabled.
+                                    </div>
+                                )}
                                 <button
                                     onClick={handleGeneratePdf}
-                                    disabled={isSaving}
-                                    className="flex-1 flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white py-4 rounded-xl font-bold text-base shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
+                                    disabled={isSaving || isExpired}
+                                    className="flex-1 flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-base shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
                                 >
                                     {isSaving
                                         ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Saving...</span></>
@@ -403,7 +416,7 @@ export const FitnessCertificateForm = () => {
                                 </button>
                                 <button
                                     onClick={handleSaveImage}
-                                    disabled={isSaving}
+                                    disabled={isSaving || isExpired}
                                     className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-gray-100 text-gray-600 rounded-xl font-bold text-base hover:bg-gray-200 transition-all disabled:opacity-50"
                                 >
                                     <Download className="w-5 h-5" />

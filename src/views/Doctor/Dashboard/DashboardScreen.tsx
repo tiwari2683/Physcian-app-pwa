@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Users, Activity, Clock, PlayCircle, Loader2, FileEdit, Trash2, RefreshCw } from 'lucide-react';
+import { Calendar, Users, Activity, Clock, PlayCircle, Loader2, FileEdit, Trash2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks';
 import { fetchWaitingRoom, updateVisitStatusThunk, fetchPatients } from '../../../controllers/slices/patientSlice';
 import { fetchAppointments } from '../../../controllers/slices/appointmentSlice';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
 import { DraftService } from '../../../services/draftService';
 import type { DraftPatient } from '../../../services/draftService';
 
@@ -21,12 +22,15 @@ function timeAgo(iso: string): string {
 export const DashboardScreen = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  
+
+  const { user } = useAppSelector(state => state.auth);
   const { waitingRoom, loadingWaitingRoom, patients } = useAppSelector(state => state.patients);
   const { appointments } = useAppSelector(state => state.appointments);
+  const { daysLeft, isExpired, isExpiringSoon, expiryDateLabel } = useSubscription();
 
   const [startingVisitId, setStartingVisitId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftPatient[]>([]);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // ── Calculation Helpers ──────────────────────────────────────────────────
   const todaysAppointmentsCount = appointments.filter(apt => {
@@ -34,16 +38,14 @@ export const DashboardScreen = () => {
     return apt.date === today || apt.date.includes(new Date().toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }));
   }).length;
 
-  // ── On mount: run GC, load drafts, and fetch metrics ──
+  // ── On mount: run GC, load data ──
   useEffect(() => {
     DraftService.cleanupOldDrafts(30);
     setDrafts(DraftService.getAllDrafts());
-    
-    // Fetch all patients for the 'Total Patients' metric
     dispatch(fetchPatients());
-    // Fetch all appointments for the 'Appointments' metric
     dispatch(fetchAppointments());
   }, [dispatch]);
+
 
   // ── Poll waiting room every 15 seconds ──────────────────────────────────────
   useEffect(() => {
@@ -57,9 +59,9 @@ export const DashboardScreen = () => {
   const handleStartConsultation = async (patient: any) => {
     setStartingVisitId(patient.visitId);
     try {
-      await dispatch(updateVisitStatusThunk({ 
-        visitId: patient.visitId, 
-        status: 'IN_PROGRESS' 
+      await dispatch(updateVisitStatusThunk({
+        visitId: patient.visitId,
+        status: 'IN_PROGRESS'
       })).unwrap();
       navigate(`/doctor/visit/new/${patient.patientId}`);
     } catch (err) {
@@ -77,21 +79,60 @@ export const DashboardScreen = () => {
     setDrafts(prev => prev.filter(d => d.draftId !== draftId));
   };
 
+  // ── Expiry banner colours ──
+  const bannerStyle = isExpired
+    ? { bg: 'bg-red-50 border-red-200', icon: 'text-red-500', text: 'text-red-800', badge: 'bg-red-100 text-red-700' }
+    : { bg: 'bg-amber-50 border-amber-200', icon: 'text-amber-500', text: 'text-amber-800', badge: 'bg-amber-100 text-amber-700' };
+
+  const showBanner = !bannerDismissed && (isExpiringSoon || isExpired);
+
   return (
     <div className="p-3 lg:p-6 space-y-3 lg:space-y-4 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between px-1">
-        <h1 className="text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">Doctor's Dashboard</h1>
+
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+            Welcome, {user?.role === 'Doctor' ? `Dr. ${user?.name || 'Physician'}` : user?.name || 'Staff'}
+          </h1>
+          <p className="text-gray-500 text-sm mt-1">
+            Here's what's happening in your clinic today.
+          </p>
+        </div>
         {loadingWaitingRoom && !waitingRoom.length && (
           <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5 animate-pulse">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching Live Queue...
           </span>
         )}
       </div>
-      
+
+      {/* ── Subscription Expiry Banner (last-30-days window + expired) ── */}
+      {showBanner && (
+        <div className={`flex items-start gap-3 px-4 py-3.5 rounded-2xl border ${bannerStyle.bg} animate-in slide-in-from-top-2 duration-300`}>
+          <AlertTriangle className={`w-5 h-5 mt-0.5 shrink-0 ${bannerStyle.icon}`} />
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-bold ${bannerStyle.text}`}>
+              {isExpired
+                ? '⛔ Clinic subscription has expired — write actions are now restricted.'
+                : `⚠️ Subscription expiring in ${daysLeft} day${daysLeft === 1 ? '' : 's'} — renew to keep full access.`}
+            </p>
+            <p className={`text-xs mt-0.5 font-medium ${bannerStyle.text} opacity-70`}>
+              {isExpired
+                ? 'Patient history and records remain fully accessible. Contact your platform administrator to renew.'
+                : `Expiry date: ${expiryDateLabel}. Patient history and existing records will always remain accessible.`}
+            </p>
+          </div>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            className={`text-xs font-bold px-2.5 py-1 rounded-lg shrink-0 ${bannerStyle.badge} hover:opacity-80 transition-opacity`}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* 📊 System Stats Section */}
       <div className="px-1">
-
         <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Waiting Room - Priority Card (Full Width on mobile) */}
           <div className="col-span-2 md:col-span-1 bg-indigo-600 p-4 rounded-2xl shadow-lg shadow-indigo-200/50 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-98">
@@ -159,11 +200,7 @@ export const DashboardScreen = () => {
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          DRAFT QUEUE — rendered above the Waiting Room, hidden when empty
-          Visually distinct: amber/orange palette + smaller compact cards
-          so doctors cannot confuse a draft with an active waiting patient
-         ═══════════════════════════════════════════════════════════════════════ */}
+      {/* DRAFT QUEUE */}
       {drafts.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-amber-100 overflow-hidden">
           <div className="p-4 border-b border-amber-50 flex items-center justify-between bg-amber-50/60">
@@ -179,7 +216,6 @@ export const DashboardScreen = () => {
             </div>
           </div>
 
-          {/* Horizontally scrollable card row */}
           <div className="p-4">
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-amber-200 scrollbar-track-transparent">
               {drafts.map(draft => {
@@ -192,7 +228,6 @@ export const DashboardScreen = () => {
                     key={draft.draftId}
                     className="snap-start flex-shrink-0 w-52 bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col gap-2.5 hover:shadow-md hover:border-amber-400 transition-all"
                   >
-                    {/* Draft badge */}
                     <div className="flex items-center justify-between">
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 text-[10px] font-bold uppercase tracking-wide">
                         <FileEdit className="w-2.5 h-2.5" /> Draft
@@ -206,7 +241,6 @@ export const DashboardScreen = () => {
                       </button>
                     </div>
 
-                    {/* Patient info */}
                     <div>
                       <p className="font-semibold text-gray-900 text-sm truncate">{name}</p>
                       {(age || sex) && (
@@ -216,13 +250,11 @@ export const DashboardScreen = () => {
                       )}
                     </div>
 
-                    {/* Last saved */}
                     <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {timeAgo(draft.lastUpdatedAt)}
                     </p>
 
-                    {/* Resume CTA */}
                     <button
                       onClick={() => handleResumeDraft(draft)}
                       className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors active:scale-95"
@@ -238,7 +270,7 @@ export const DashboardScreen = () => {
         </div>
       )}
 
-      {/* ── Live Waiting Room Queue (Vertical Compression) ── */}
+      {/* ── Live Waiting Room Queue ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-3 lg:p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <div>
@@ -252,7 +284,7 @@ export const DashboardScreen = () => {
             <p className="text-[11px] text-gray-500 mt-0.5">Queued by Assistant Panel</p>
           </div>
         </div>
-        
+
         <div className="p-3 lg:p-4">
           {(() => {
             const sortedQueue = [...waitingRoom].sort((a, b) =>
@@ -317,4 +349,3 @@ export const DashboardScreen = () => {
     </div>
   );
 };
-

@@ -7,6 +7,8 @@ import {
 import { X, Search, Loader2, Calendar } from 'lucide-react';
 import type { Appointment } from '../../../models/index';
 import { patientService } from '../../../services/api/patientService';
+import toast from 'react-hot-toast';
+import { TimeInput12h } from '../../../components/Common/TimeInput12h';
 
 interface Props {
     onClose: () => void;
@@ -34,7 +36,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
         address: '',
         type: 'Follow-up',
         date: '',
-        time: ''
+        time: '09:00'
     };
 
     const [formData, setFormData] = useState(emptyForm);
@@ -125,7 +127,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
         setSearchResults([]);
         setFormData(prev => ({
             ...emptyForm,
-            type: prev.type,
+            type: 'First Visit', // Default for new patients
             date: prev.date,
             time: prev.time
         }));
@@ -133,6 +135,15 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Mobile validation for Indian numbers (10 digits starting with 6-9)
+        if (mode === 'new') {
+            if (!/^[6-9]\d{9}$/.test(formData.mobile)) {
+                toast.error('Please enter a valid 10-digit Indian mobile number.');
+                return;
+            }
+        }
+
         setLoading(true);
 
         try {
@@ -345,7 +356,10 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                         <input
                                             type="tel"
                                             value={formData.mobile}
-                                            onChange={(e) => setFormData({ ...formData, mobile: e.target.value.replace(/\D/g, '') })}
+                                            onChange={(e: any) => {
+                                                const clean = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                                setFormData({ ...formData, mobile: clean });
+                                            }}
                                             placeholder="10-digit number"
                                             maxLength={10}
                                             className={`w-full px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:ring-4 focus:ring-primary-base/5 focus:border-primary-base focus:outline-none text-sm font-bold text-slate-700 transition-all ${mode === 'existing' ? 'opacity-70 cursor-not-allowed' : ''}`}
@@ -407,9 +421,14 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                         required
                                     >
                                         <option value="First Visit">First Visit Interaction</option>
-                                        <option value="Follow-up">Regular Follow-up</option>
                                         <option value="Emergency">Urgent / Emergency</option>
-                                        <option value="Check-up">Routine Check-up</option>
+                                        {mode === 'existing' && (
+                                            <>
+                                                <option value="Follow-up">Regular Follow-up</option>
+                                                <option value="Check-up">Routine Check-up</option>
+                                                <option value="Consultation">Professional Consultation</option>
+                                            </>
+                                        )}
                                     </select>
                                 </div>
 
@@ -424,16 +443,12 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                             required
                                         />
                                     </div>
-                                    <div className="space-y-1 text-xs">
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Time</label>
-                                        <input
-                                            type="time"
-                                            value={formData.time}
-                                            onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:ring-4 focus:ring-primary-base/5 focus:border-primary-base focus:outline-none text-sm font-bold text-slate-700 transition-all"
-                                            required
-                                        />
-                                    </div>
+                                    <TimeInput12h
+                                        label="Time"
+                                        value={formData.time}
+                                        onChange={(val) => setFormData({ ...formData, time: val })}
+                                        required
+                                    />
                                 </div>
                             </div>
                         )}

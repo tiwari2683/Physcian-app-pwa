@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks';
 import { createNewPatient } from '../../../controllers/slices/patientSlice';
-import { ArrowLeft, UserPlus } from 'lucide-react';
+import { ArrowLeft, UserPlus, ShieldOff } from 'lucide-react';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
 
 export const NewPatientRegistration = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector(state => state.patients);
+  const { isExpired } = useSubscription();
 
   // Exact same field names as native app's basic.tsx state
   const [formData, setFormData] = useState({
@@ -51,6 +53,7 @@ export const NewPatientRegistration = () => {
   };
 
   const handleSave = async () => {
+    if (isExpired) return;
     if (!validate()) return;
 
     const payload = {
@@ -82,8 +85,8 @@ export const NewPatientRegistration = () => {
         </div>
         <button
           onClick={handleSave}
-          disabled={loading}
-          className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 font-medium"
+          disabled={loading || isExpired}
+          className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed font-medium"
         >
           {loading ? (
             <>
@@ -98,6 +101,17 @@ export const NewPatientRegistration = () => {
           )}
         </button>
       </div>
+
+      {/* Subscription expired banner */}
+      {isExpired && (
+        <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+          <ShieldOff className="w-5 h-5 shrink-0" />
+          <div>
+            <p className="text-sm font-bold">Subscription expired</p>
+            <p className="text-xs font-medium opacity-80 mt-0.5">New patient registrations are restricted. Contact your platform administrator to renew the subscription.</p>
+          </div>
+        </div>
+      )}
 
       {/* Backend error */}
       {error && (

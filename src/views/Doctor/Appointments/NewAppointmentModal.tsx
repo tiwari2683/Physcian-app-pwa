@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAppDispatch } from '../../../controllers/hooks/hooks';
 import { createAppointment } from '../../../controllers/slices/appointmentSlice';
-import { X, Search, Loader2 } from 'lucide-react';
+import { X, Search, Loader2, ShieldOff } from 'lucide-react';
 import type { Appointment } from '../../../models';
 import { patientService } from '../../../services/api/patientService';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import toast from 'react-hot-toast';
+import { TimeInput12h } from '../../../components/Common/TimeInput12h';
 
 const Button = ({ variant = 'primary', loading, children, ...props }: any) => {
     const baseStyle = "px-5 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2";
@@ -35,6 +38,7 @@ interface Props {
 
 export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) => {
     const dispatch = useAppDispatch();
+    const { isExpired } = useSubscription();
     const [loading, setLoading] = useState(false);
     
     // Existing vs New Mode
@@ -54,7 +58,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
         address: '',
         type: 'Follow-up',
         date: '',
-        time: ''
+        time: '09:00'
     };
 
     const [formData, setFormData] = useState(emptyForm);
@@ -143,7 +147,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
         setSearchResults([]);
         setFormData(prev => ({
             ...emptyForm,
-            type: prev.type,
+            type: 'First Visit', // Default for new patients
             date: prev.date,
             time: prev.time
         }));
@@ -151,6 +155,19 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isExpired) {
+            toast.error('Subscription expired. New appointments cannot be created.');
+            return;
+        }
+
+        // Mobile validation for Indian numbers (10 digits starting with 6-9)
+        if (mode === 'new') {
+            if (!/^[6-9]\d{9}$/.test(formData.mobile)) {
+                toast.error('Please enter a valid 10-digit Indian mobile number.');
+                return;
+            }
+        }
+
         setLoading(true);
 
         try {
@@ -316,7 +333,10 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                         label="Mobile Number"
                                         type="tel"
                                         value={formData.mobile}
-                                        onChange={(e: any) => setFormData({ ...formData, mobile: e.target.value })}
+                                        onChange={(e: any) => {
+                                            const clean = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                            setFormData({ ...formData, mobile: clean });
+                                        }}
                                         placeholder="e.g. 9876543210"
                                         required
                                         disabled={mode === 'existing'}
@@ -373,9 +393,14 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                         required
                                     >
                                         <option value="First Visit">First Visit</option>
-                                        <option value="Follow-up">Follow-up</option>
                                         <option value="Emergency">Emergency</option>
-                                        <option value="Check-up">Check-up</option>
+                                        {mode === 'existing' && (
+                                            <>
+                                                <option value="Follow-up">Follow-up</option>
+                                                <option value="Check-up">Check-up</option>
+                                                <option value="Consultation">Consultation</option>
+                                            </>
+                                        )}
                                     </select>
                                 </div>
 
@@ -387,11 +412,10 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                         onChange={(e: any) => setFormData({ ...formData, date: e.target.value })}
                                         required
                                     />
-                                    <Input
+                                    <TimeInput12h
                                         label="Time"
-                                        type="time"
                                         value={formData.time}
-                                        onChange={(e: any) => setFormData({ ...formData, time: e.target.value })}
+                                        onChange={(val) => setFormData({ ...formData, time: val })}
                                         required
                                     />
                                 </div>
@@ -400,20 +424,26 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                     </form>
                 </div>
 
-                <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 shrink-0">
-                    <Button variant="secondary" onClick={onClose} type="button">
-                        Cancel
-                    </Button>
-                    <Button 
-                        variant="primary" 
-                        type="submit" 
-                        form="new-appointment-form" 
-                        loading={loading}
-                        disabled={mode === 'existing' && !selectedPatientId}
-                    >
-                        {initialData ? 'Save Changes' : 'Schedule Appointment'}
-                    </Button>
-                </div>
+                    {isExpired && (
+                        <div className="px-6 pb-0 flex items-center gap-2 text-xs font-bold text-red-600 bg-red-50 py-2.5 border-t border-red-100">
+                            <ShieldOff className="w-3.5 h-3.5 shrink-0" />
+                            Subscription expired — new appointments are disabled.
+                        </div>
+                    )}
+                    <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 shrink-0">
+                        <Button variant="secondary" onClick={onClose} type="button">
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            type="submit"
+                            form="new-appointment-form"
+                            loading={loading}
+                            disabled={(mode === 'existing' && !selectedPatientId) || isExpired}
+                        >
+                            {initialData ? 'Save Changes' : 'Schedule Appointment'}
+                        </Button>
+                    </div>
             </div>
         </div>
     );

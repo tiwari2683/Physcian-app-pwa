@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { useAppDispatch } from '../../controllers/hooks/hooks';
+import { fetchClinicDetails } from '../../controllers/slices/clinicSlice';
 
 export const MainLayout = () => {
+  const dispatch = useAppDispatch();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // Fetch clinic metadata once per session at the top level
+  useEffect(() => {
+    dispatch(fetchClinicDetails());
+  }, [dispatch]);
 
   // On mobile the hamburger inside sidebar should open the drawer
   // On desktop it should toggle expanded/collapsed
@@ -34,3 +42,4 @@ export const MainLayout = () => {
     </div>
   );
 };
+
