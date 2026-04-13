@@ -412,7 +412,7 @@ async function handleGetPatientFiles(requestData) {
         }
 
         const patientData = patientResult.Item;
-        
+
         // ============================================
         // ZERO-TRUST TENANT CHECK
         // ============================================
@@ -1499,7 +1499,7 @@ async function updatePatientData(requestData) {
             }));
             existingPatient = existingResult.Item;
             console.log(`📋 Fetched existing patient, has ${existingPatient?.reportFiles?.length || 0} files`);
-            
+
             // ============================================
             // ZERO-TRUST TENANT CHECK
             // ============================================
@@ -1972,7 +1972,7 @@ async function getActiveVisit(requestData) {
 
             if (result.Items && result.Items.length > 0) {
                 activeVisit = result.Items[0];
-                
+
                 // ============================================
                 // ZERO-TRUST TENANT CHECK
                 // ============================================
@@ -2486,27 +2486,57 @@ async function savePrescription(requestData) {
 async function getPatientPrescriptions(requestData) {
     const { patientId, tenantId, userRole } = requestData;
     if (!patientId) return formatErrorResponse("Missing patientId");
+    
     try {
-        const result = await dynamodb.send(new QueryCommand({
-            TableName: PRESCRIPTIONS_TABLE,
-            IndexName: 'PatientIdIndex',
-            KeyConditionExpression: "patientId = :pid",
-            ExpressionAttributeValues: { ":pid": patientId }
-        }));
-        // ClientSide filter by tenant_id — prescriptions inherit tenantId from patient write
-        const items = (result.Items || []).filter(p => !p.tenant_id || p.tenant_id === tenantId || userRole === 'SuperAdmin');
-        return formatSuccessResponse(items);
-    } catch (e) {
-        // Graceful fallback if GSI doesn't exist yet
-        if (e.name === 'ValidationException' || e.name === 'ResourceNotFoundException') {
+        // 1. Legacy Prescriptions
+        let legacyItems = [];
+        try {
+            const result = await dynamodb.send(new QueryCommand({
+                TableName: PRESCRIPTIONS_TABLE,
+                IndexName: 'PatientIdIndex',
+                KeyConditionExpression: "patientId = :pid",
+                ExpressionAttributeValues: { ":pid": patientId }
+            }));
+            legacyItems = result.Items || [];
+        } catch (e) {
             console.warn("GSI PatientIdIndex missing, falling back to Scan.");
             const scan = await dynamodb.send(new ScanCommand({
                 TableName: PRESCRIPTIONS_TABLE,
                 FilterExpression: "patientId = :pid",
                 ExpressionAttributeValues: { ":pid": patientId }
             }));
-            return formatSuccessResponse(scan.Items || []);
+            legacyItems = scan.Items || [];
         }
+        
+        const filteredLegacy = legacyItems.filter(p => !p.tenant_id || p.tenant_id === tenantId || userRole === 'SuperAdmin');
+
+        // 2. Completed visits containing medications or diagnosis
+        const visitResult = await dynamodb.send(new QueryCommand({
+            TableName: VISITS_TABLE,
+            IndexName: 'patientId-status-index',
+            KeyConditionExpression: "patientId = :pid",
+            ExpressionAttributeValues: { ":pid": patientId }
+        }));
+        
+        const visitFiltered = (visitResult.Items || []).filter(v => 
+            v.status === 'COMPLETED' && 
+            (!v.tenant_id || v.tenant_id === tenantId || userRole === 'SuperAdmin') &&
+            ((v.medications && v.medications.length > 0) || (v.diagnosis && v.diagnosis.trim() !== ''))
+        ).map(v => ({
+            ...v,
+            patientName: v.name || v.patientName || 'Unknown Patient',
+            gender: v.sex || v.gender || 'N/A',
+            prescriptionDate: v.visitDate || v.createdAt
+        }));
+
+        const mergedItems = [...filteredLegacy, ...visitFiltered].sort((a, b) => {
+            const dateA = new Date(a.prescriptionDate || a.visitDate || a.createdAt).getTime();
+            const dateB = new Date(b.prescriptionDate || b.visitDate || b.createdAt).getTime();
+            return dateB - dateA;
+        });
+
+        return formatSuccessResponse(mergedItems);
+    } catch (e) {
         return formatErrorResponse(e.message);
     }
 }
@@ -2515,20 +2545,54 @@ async function getAllPrescriptions(requestData) {
     try {
         const { tenantId, userRole } = requestData;
 
+        // 1. Scan Legacy Prescriptions
+        let legacyItems = [];
         if (userRole === 'SuperAdmin') {
-            // SuperAdmin sees all (global view)
             const result = await dynamodb.send(new ScanCommand({ TableName: PRESCRIPTIONS_TABLE }));
-            return formatSuccessResponse(result.Items || []);
+            legacyItems = result.Items || [];
+        } else {
+            const result = await dynamodb.send(new ScanCommand({
+                TableName: PRESCRIPTIONS_TABLE,
+                FilterExpression: "tenant_id = :tid",
+                ExpressionAttributeValues: { ":tid": tenantId }
+            }));
+            legacyItems = result.Items || [];
         }
 
-        // Regular users: scope to their clinic only
-        const result = await dynamodb.send(new ScanCommand({
-            TableName: PRESCRIPTIONS_TABLE,
-            FilterExpression: "tenant_id = :tid",
-            ExpressionAttributeValues: { ":tid": tenantId }
+        // 2. Scan Visits for COMPLETED visits with meds/diagnosis
+        let vParams = {
+            TableName: VISITS_TABLE,
+            FilterExpression: "#status = :c AND (size(medications) > :zero OR attribute_exists(diagnosis))",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: { ":c": "COMPLETED", ":zero": 0 }
+        };
+        
+        if (userRole !== 'SuperAdmin' && tenantId) {
+            vParams.FilterExpression += " AND tenant_id = :tid";
+            vParams.ExpressionAttributeValues[":tid"] = tenantId;
+        }
+
+        const vResult = await dynamodb.send(new ScanCommand(vParams));
+        
+        // Final sanity filter, just in case Dynamo's size() logic is tricky
+        const visitFiltered = (vResult.Items || []).filter(v => 
+            (v.medications && v.medications.length > 0) || (v.diagnosis && v.diagnosis.trim() !== '')
+        ).map(v => ({
+            ...v,
+            patientName: v.name || v.patientName || 'Unknown Patient',
+            gender: v.sex || v.gender || 'N/A',
+            prescriptionDate: v.visitDate || v.createdAt
         }));
-        return formatSuccessResponse(result.Items || []);
+
+        const mergedItems = [...legacyItems, ...visitFiltered].sort((a, b) => {
+            const dateA = new Date(a.prescriptionDate || a.visitDate || a.createdAt).getTime();
+            const dateB = new Date(b.prescriptionDate || b.visitDate || b.createdAt).getTime();
+            return dateB - dateA;
+        });
+
+        return formatSuccessResponse(mergedItems);
     } catch (error) {
+        console.error("❌ Error running getAllPrescriptions:", error);
         return formatErrorResponse(error.message);
     }
 }
@@ -3021,7 +3085,7 @@ async function syncLegacyStaffToDynamo(requestData) {
                 const email = attrs['email'] || user.Username;
 
                 if (!tenantId || !role) continue; // Skip superadmins or malformed
-                
+
                 // Only sync Doctors and Assistants
                 if (role === 'Doctor' || role === 'Assistant') {
                     await dynamodb.send(new PutCommand({
@@ -3045,8 +3109,8 @@ async function syncLegacyStaffToDynamo(requestData) {
         } while (paginationToken);
 
         console.log(`✅ Legacy sync complete. Migrated ${syncedCount} staff profiles.`);
-        return formatSuccessResponse({ 
-            success: true, 
+        return formatSuccessResponse({
+            success: true,
             message: `Successfully migrated ${syncedCount} staff members from Cognito to DynamoDB.`,
             syncedCount
         });
@@ -3084,13 +3148,13 @@ async function renewClinicSubscription(requestData) {
         }
 
         const currentExpiry = new Date(clinicResult.Item.subscription_expiry);
-        
+
         let newExpiry = new Date();
         // If it's already expired, add from today. If it's not expired yet, add from the current expiry.
         if (currentExpiry > newExpiry) {
             newExpiry = currentExpiry;
         }
-        
+
         newExpiry.setMonth(newExpiry.getMonth() + parseInt(validityMonths, 10));
 
         await dynamodb.send(new UpdateCommand({
@@ -3098,16 +3162,16 @@ async function renewClinicSubscription(requestData) {
             Key: { tenant_id: clinicId },
             UpdateExpression: 'SET subscription_expiry = :newExpiry, #status = :activeStatus',
             ExpressionAttributeNames: { '#status': 'status' },
-            ExpressionAttributeValues: { 
+            ExpressionAttributeValues: {
                 ':newExpiry': newExpiry.toISOString(),
                 ':activeStatus': 'ACTIVE'
             }
         }));
 
         console.log(`✅ Clinic ${clinicId} subscription renewed. New expiry: ${newExpiry.toISOString()}`);
-        
-        return formatSuccessResponse({ 
-            success: true, 
+
+        return formatSuccessResponse({
+            success: true,
             message: `Subscription extended. New expiry: ${newExpiry.toLocaleDateString()}`
         });
 

@@ -154,9 +154,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
         setLoading(true);
 
         try {
-            await dispatch(createAppointment({
-                ...(initialData?.id ? { id: initialData.id } : {}),
-                patientId: selectedPatientId || undefined,
+            const formDataPayload = {
                 patientName: formData.patientName,
                 age: formData.age,
                 mobile: formData.mobile,
@@ -166,7 +164,29 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                 time: formData.time,
                 type: formData.type,
                 status: initialData?.status || 'Upcoming'
-            })).unwrap();
+            };
+
+            if (mode === 'new') {
+                // Fix Ghost Patient Bug: Dynamically import and use the new thunk
+                const { createPatientAndAppointment } = await import('../../../controllers/slices/appointmentSlice');
+                await dispatch(createPatientAndAppointment({
+                    patientData: {
+                        name: formData.patientName,
+                        age: formData.age || '0',
+                        sex: formData.sex,
+                        mobile: formData.mobile,
+                        address: formData.address
+                    },
+                    appointmentData: formDataPayload
+                })).unwrap();
+            } else {
+                // Existing Patient
+                await dispatch(createAppointment({
+                    ...(initialData?.id ? { id: initialData.id } : {}),
+                    patientId: selectedPatientId || undefined,
+                    ...formDataPayload
+                })).unwrap();
+            }
 
             onClose();
         } catch (error) {
