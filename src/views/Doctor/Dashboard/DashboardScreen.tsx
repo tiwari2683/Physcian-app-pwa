@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Users, Activity, Clock, PlayCircle, Loader2, FileEdit, Trash2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Calendar, Users, Activity, Clock, PlayCircle, Loader2, FileEdit, Trash2, RefreshCw, AlertTriangle, UserPlus } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks';
 import { fetchWaitingRoom, updateVisitStatusThunk, fetchPatients } from '../../../controllers/slices/patientSlice';
 import { fetchAppointments } from '../../../controllers/slices/appointmentSlice';
@@ -23,7 +23,6 @@ export const DashboardScreen = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
 
-  const { user } = useAppSelector(state => state.auth);
   const { waitingRoom, loadingWaitingRoom, patients } = useAppSelector(state => state.patients);
   const { appointments } = useAppSelector(state => state.appointments);
   const { daysLeft, isExpired, isExpiringSoon, expiryDateLabel } = useSubscription();
@@ -88,22 +87,23 @@ export const DashboardScreen = () => {
 
   return (
     <div className="p-3 lg:p-6 space-y-3 lg:space-y-4 max-w-7xl mx-auto">
-
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-            Welcome, {user?.role === 'Doctor' ? `Dr. ${user?.name || 'Physician'}` : user?.name || 'Staff'}
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Here's what's happening in your clinic today.
-          </p>
+      <div className="flex items-center justify-between px-1">
+        <h1 className="text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">Doctor's Dashboard</h1>
+        <div className="flex items-center gap-3">
+          {loadingWaitingRoom && !waitingRoom.length && (
+            <span className="text-xs font-semibold text-blue-600 hidden sm:flex items-center gap-1.5 animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching...
+            </span>
+          )}
+          <button 
+             onClick={() => navigate('/doctor/visit/new')}
+             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 font-bold text-sm transition-all active:scale-95 shadow-sm shadow-blue-600/30 shrink-0"
+          >
+             <UserPlus className="w-4 h-4" />
+             <span className="hidden sm:inline">New Patient</span>
+             <span className="sm:hidden">New</span>
+          </button>
         </div>
-        {loadingWaitingRoom && !waitingRoom.length && (
-          <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5 animate-pulse">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching Live Queue...
-          </span>
-        )}
       </div>
 
       {/* ── Subscription Expiry Banner (last-30-days window + expired) ── */}
@@ -220,8 +220,8 @@ export const DashboardScreen = () => {
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-amber-200 scrollbar-track-transparent">
               {drafts.map(draft => {
                 const name = (draft.formData?.name as string) || 'Unnamed Patient';
-                const age  = draft.formData?.age  as string | undefined;
-                const sex  = draft.formData?.sex  as string | undefined;
+                const age = draft.formData?.age as string | undefined;
+                const sex = draft.formData?.sex as string | undefined;
 
                 return (
                   <div

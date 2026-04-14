@@ -145,10 +145,15 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                                 })}
                                 <td className="px-3 py-1.5 bg-blue-50/50">
                                     <input
-                                        type="number"
+                                        type="text"
+                                        inputMode="decimal"
                                         value={vitals[field.key] || ''}
-                                        onChange={(e) => onVitalsChange(field.key, e.target.value)}
-                                        step="0.01"
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                                onVitalsChange(field.key, val);
+                                            }
+                                        }}
                                         placeholder="—"
                                         className="w-full text-center bg-white border border-blue-200 rounded-md px-2 py-1.5 text-sm font-semibold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
                                     />
@@ -207,14 +212,7 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
       }
       
       if (!items || items.length === 0) {
-          // DEBUGGING: If it's truly empty, let's render the raw payload so the user can take a screenshot!
-          historyRecords = [{
-              date: new Date().toISOString(),
-              title: 'DEBUG: Raw API Response for ' + type,
-              details: JSON.stringify(parsedData, null, 2),
-              doctorName: 'System'
-          }];
-          setHistoryData(historyRecords);
+          setHistoryData([]);
           return;
       }
 
@@ -259,8 +257,8 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
       console.error(`Failed to fetch ${type}:`, error);
       setHistoryData([{
           date: new Date().toISOString(),
-          title: 'DEBUG: Error',
-          details: error instanceof Error ? error.message : JSON.stringify(error),
+          title: 'System Error',
+          details: 'Failed to retrieve historical data. Please check your connection or try again.',
           doctorName: 'System'
       }]); 
     } finally {
@@ -273,6 +271,13 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
 
   const handleChange = (field: string, value: string) =>
     setFormData({ ...formData, [field]: value });
+
+  const handleNumericChange = (field: string, value: string) => {
+    // Allow only numbers and a single decimal point
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+      setFormData({ ...formData, [field]: value });
+    }
+  };
 
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -346,6 +351,9 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
             value={formData.newHistoryEntry || ''}
             onChangeText={text => handleChange('newHistoryEntry', text)}
           />
+          <p className="text-[10px] text-gray-400 mt-1 ml-1 flex items-center gap-1">
+            <span className="text-blue-400">ℹ️</span> Automatically starts a bulleted list for symptoms and history.
+          </p>
         </div>
       </SectionCard>
 
@@ -368,13 +376,16 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
               History
             </button>
           </div>
-          <textarea
+          <AutoBulletTextArea
             rows={4}
             placeholder="Enter report details or upload reports"
             className="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm placeholder:text-gray-300"
             value={formData.reports || ''}
-            onChange={e => handleChange('reports', e.target.value)}
+            onChangeText={text => handleChange('reports', text)}
           />
+          <p className="text-[10px] text-gray-400 mt-1 ml-1 flex items-center gap-1">
+            <span className="text-blue-400">ℹ️</span> Automatically starts a bulleted list for report summaries.
+          </p>
 
           {/* Single combined file input: accepts images, PDFs, Word docs */}
           <input
@@ -535,22 +546,26 @@ export const ClinicalTab: React.FC<ClinicalTabProps> = ({ formData, setFormData,
                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-tight ml-1">{field.label}</label>
                       <input
                         type="text"
+                        inputMode="decimal"
                         placeholder={field.placeholder}
                         className="w-full p-2.5 border border-gray-100 rounded-lg bg-blue-50/30 focus:bg-white focus:border-blue-300 outline-none text-sm font-medium transition-all"
                         value={formData[field.key] || ''}
-                        onChange={e => handleChange(field.key, e.target.value)}
+                        onChange={e => handleNumericChange(field.key, e.target.value)}
                       />
                     </div>
                   ))}
                   {/* Others at the bottom */}
                   <div className="col-span-2 space-y-1 mt-2">
                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-tight ml-1">Others</label>
-                      <textarea
+                      <AutoBulletTextArea
                         rows={4}
                         className="w-full p-3 border border-gray-100 rounded-lg bg-blue-50/30 focus:bg-white focus:border-blue-300 outline-none text-sm font-medium transition-all resize-none"
                         value={formData.others || ''}
-                        onChange={e => handleChange('others', e.target.value)}
+                        onChangeText={text => handleChange('others', text)}
                       />
+                      <p className="text-[10px] text-gray-400 mt-1 ml-1 flex items-center gap-1">
+                        <span className="text-blue-400">ℹ️</span> Use this for additional clinical notes or vital parameters.
+                      </p>
                   </div>
                 </div>
              </>

@@ -59,6 +59,23 @@ export const patientService = {
     return parseResponse(response.data);
   },
 
+  // Creates a new visit record (WAITING status) in the Visits table.
+  // Used by the doctor-direct flow when no assistant has pre-initiated the visit.
+  initiateVisit: async (patientId: string, patientInfo: {
+    name?: string; age?: number; sex?: string; mobile?: string; address?: string;
+  }): Promise<{ visitId: string } | null> => {
+    const response = await apiClient.post('/patient-data', {
+      action: 'initiateVisit',
+      patientId,
+      ...patientInfo
+    });
+    const parsed = parseResponse(response.data);
+    if (!parsed.success) {
+      throw new Error(parsed.error || 'Failed to initiate visit.');
+    }
+    return { visitId: parsed.visitId };
+  },
+
   // Fetches the active (WAITING / IN_PROGRESS) visit for a patient — for assistant prefill
   getActiveVisit: async (patientId: string): Promise<any> => {
     const response = await apiClient.post('/patient-data', {

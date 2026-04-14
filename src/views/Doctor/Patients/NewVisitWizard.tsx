@@ -274,15 +274,32 @@ export const NewVisitWizard = () => {
         }
       };
 
-      if (activeVisitId) {
-        await patientService.completeVisit({
-          visitId:   activeVisitId,
-          patientId,
-          acuteData
+      // If an assistant pre-created a visit, complete it.
+      // Otherwise (doctor-direct flow), auto-initiate a visit record first
+      // so that ALL consultation data is written to the Visits table — never the Patients table.
+      let visitIdToComplete = activeVisitId;
+
+      if (!visitIdToComplete) {
+        console.log('No active visit found — auto-initiating visit for doctor-direct flow...');
+        const initiated = await patientService.initiateVisit(patientId, {
+          name:    acuteData.name,
+          age:     acuteData.age,
+          sex:     acuteData.sex,
+          mobile:  acuteData.mobile,
+          address: acuteData.address,
         });
-      } else {
-        await patientService.updatePatient(patientId, acuteData);
+        if (!initiated?.visitId) {
+          throw new Error('Failed to create visit record before completing consultation.');
+        }
+        visitIdToComplete = initiated.visitId;
+        console.log(`✅ Auto-initiated visit: ${visitIdToComplete}`);
       }
+
+      await patientService.completeVisit({
+        visitId:   visitIdToComplete,
+        patientId,
+        acuteData
+      });
 
       clearDraft();
       navigate('/doctor/patients');

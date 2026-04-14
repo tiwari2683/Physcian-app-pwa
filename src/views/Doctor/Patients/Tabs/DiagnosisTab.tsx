@@ -3,6 +3,7 @@ import { HistorySidebar } from '../../../../components/Common/HistorySidebar';
 import type { HistoryRecord } from '../../../../components/Common/HistoryModal';
 import { apiClient } from '../../../../services/api/apiClient';
 import { Activity, Clock } from 'lucide-react';
+import { AutoBulletTextArea } from '../../../../components/Common/AutoBulletTextArea';
 
 interface DiagnosisTabProps {
   formData: any;
@@ -179,13 +180,16 @@ export const DiagnosisTab: React.FC<DiagnosisTabProps> = ({ formData, setFormDat
               History
             </button>
           </div>
-          <textarea 
+          <AutoBulletTextArea 
             rows={5}
             placeholder="Enter primary and secondary diagnosis (e.g. Type 2 Diabetes, Hypertension)..." 
             className="w-full p-4 border border-gray-100 rounded-xl bg-blue-50/30 focus:bg-white focus:border-blue-300 outline-none text-sm font-medium transition-all resize-none"
             value={formData.diagnosis || ''}
-            onChange={(e) => setFormData({ ...formData, diagnosis: e.target.value })}
+            onChangeText={(text) => setFormData({ ...formData, diagnosis: text })}
           />
+          <p className="text-[10px] text-gray-400 mt-1 ml-1 flex items-center gap-1">
+            <span className="text-blue-400">ℹ️</span> This field automatically starts a bulleted list for clarity.
+          </p>
         </div>
       </SectionCard>
 
@@ -224,13 +228,16 @@ export const DiagnosisTab: React.FC<DiagnosisTabProps> = ({ formData, setFormDat
 
           <div className="space-y-2 mt-4">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-tight ml-1">Other Investigations</label>
-            <textarea 
+            <AutoBulletTextArea 
               rows={2}
               placeholder="Type any other tests not listed above..." 
               className="w-full p-3 border border-gray-100 rounded-lg bg-blue-50/30 focus:bg-white focus:border-blue-300 outline-none text-sm font-medium transition-all resize-none"
               value={formData.customInvestigations || ''}
-              onChange={(e) => setFormData({ ...formData, customInvestigations: e.target.value })}
+              onChangeText={(text) => setFormData({ ...formData, customInvestigations: text })}
             />
+            <p className="text-[10px] text-gray-400 mt-1 ml-1 flex items-center gap-1">
+              <span className="text-blue-400">ℹ️</span> Lists tests in a bulleted format.
+            </p>
           </div>
         </div>
       </SectionCard>
