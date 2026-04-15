@@ -7,9 +7,9 @@ import {
     initializeAsstExistingVisit,
     loadAsstDraftIntoState,
 } from '../../../controllers/slices/assistant/asstPatientVisitSlice';
-import { 
+import {
     // initiateAsstVisitThunk, // Commented out to prevent premature visit initiation
-    fetchAsstPatientDataThunk 
+    fetchAsstPatientDataThunk
 } from '../../../controllers/assistant/asstThunks';
 import { BasicTab } from './Tabs/BasicTab';
 import { ClinicalTab } from './Tabs/ClinicalTab';
@@ -17,16 +17,16 @@ import { DiagnosisTab } from './Tabs/DiagnosisTab';
 import { OverviewTab } from './Tabs/OverviewTab';
 import { DraftService } from '../../../services/assistant/DraftService';
 import HistoryDrawer from './components/HistoryDrawer';
-import { 
-    Stethoscope, 
-    ClipboardList, 
-    Activity, 
-    FileText, 
-    AlertCircle, 
-    ChevronLeft, 
-    ChevronRight, 
-    Save, 
-    ShieldCheck, 
+import {
+    Stethoscope,
+    ClipboardList,
+    Activity,
+    FileText,
+    AlertCircle,
+    ChevronLeft,
+    ChevronRight,
+    Save,
+    ShieldCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import '../Assistant.css';
@@ -48,17 +48,17 @@ const AssistantVisitWizard: React.FC = () => {
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
     const asstVisitState = useAppSelector((state) => state.asstPatientVisit);
-    
-    const { 
-        activeTab, 
-        isVisitLocked, 
+
+    const {
+        activeTab,
+        isVisitLocked,
         // visitId, // Commented out because premature Visit Initiation has been disabled
-        patientId, 
-        draftId, 
-        cloudPatientId, 
-        basic, 
-        isHistoryDrawerOpen, 
-        isSubmitting, 
+        patientId,
+        draftId,
+        cloudPatientId,
+        basic,
+        isHistoryDrawerOpen,
+        isSubmitting,
     } = asstVisitState;
 
     const isInitialized = useRef(false);
@@ -198,12 +198,12 @@ const AssistantVisitWizard: React.FC = () => {
     return (
         <div className="flex flex-col min-h-screen bg-appBg relative">
             <div className={`p-4 md:p-6 lg:p-8 max-w-5xl mx-auto w-full transition-all duration-500 ${isHistoryDrawerOpen ? 'lg:pr-[420px]' : ''}`}>
-                
+
                 {/* Header */}
                 <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
                     <div className="flex items-center gap-5">
-                        <Link 
-                            to="/assistant" 
+                        <Link
+                            to="/assistant"
                             className="w-10 h-10 bg-white rounded-xl border border-slate-100 shadow-sm text-slate-400 hover:text-primary-base hover:border-primary-base transition-all active:scale-95 flex items-center justify-center"
                         >
                             <ChevronLeft size={20} />
@@ -244,16 +244,15 @@ const AssistantVisitWizard: React.FC = () => {
                                 key={tab.id}
                                 onClick={() => !isBlocked && dispatch(setAsstActiveTab(tab.id))}
                                 disabled={isBlocked}
-                                className={`relative flex items-center gap-2.5 px-6 py-3 rounded-2xl font-black text-xs md:text-sm whitespace-nowrap transition-all duration-300 group ${
-                                    isActive 
-                                        ? 'text-white' 
-                                        : isBlocked 
-                                            ? 'text-slate-300 cursor-not-allowed' 
+                                className={`relative flex items-center gap-2.5 px-6 py-3 rounded-2xl font-black text-xs md:text-sm whitespace-nowrap transition-all duration-300 group ${isActive
+                                        ? 'text-white'
+                                        : isBlocked
+                                            ? 'text-slate-300 cursor-not-allowed'
                                             : 'text-slate-500 hover:bg-slate-50'
-                                }`}
+                                    }`}
                             >
                                 {isActive && (
-                                    <motion.div 
+                                    <motion.div
                                         layoutId="asst-active-tab"
                                         className="absolute inset-0 bg-primary-base rounded-2xl shadow-lg shadow-primary-base/30"
                                         transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
