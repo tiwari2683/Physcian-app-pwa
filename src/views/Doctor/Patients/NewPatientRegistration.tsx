@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks
 import { createNewPatient } from '../../../controllers/slices/patientSlice';
 import { ArrowLeft, UserPlus, ShieldOff } from 'lucide-react';
 import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 
 export const NewPatientRegistration = () => {
   const navigate = useNavigate();
@@ -53,7 +54,11 @@ export const NewPatientRegistration = () => {
   };
 
   const handleSave = async () => {
-    if (isExpired) return;
+    try {
+      assertSubscriptionActive(isExpired, 'Subscription expired. New patient registrations are blocked.');
+    } catch {
+      return;
+    }
     if (!validate()) return;
 
     const payload = {

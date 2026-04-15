@@ -24,6 +24,7 @@ import { generatePrescriptionFromMedications } from '../../../utils/FitnessCerti
 import { generateChunkedFitnessCertificate } from '../../../utils/FitnessCertificatePdfTemplate';
 import { useSubscription } from '../../../controllers/hooks/useSubscription';
 import html2canvas from 'html2canvas';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 
 const SURGERY_FITNESS_OPTIONS = [
     "Fit for surgery under general anaesthesia",
@@ -274,8 +275,9 @@ export const FitnessCertificateForm = () => {
     };
 
     const handleGeneratePdf = async () => {
-        if (isExpired) {
-            alert('Subscription expired. Fitness certificates cannot be generated.');
+        try {
+            assertSubscriptionActive(isExpired, 'Subscription expired. Fitness certificates cannot be generated.');
+        } catch {
             return;
         }
         const saved = await handleSave();
@@ -283,6 +285,11 @@ export const FitnessCertificateForm = () => {
     };
 
     const handleSaveImage = async () => {
+        try {
+            assertSubscriptionActive(isExpired, 'Subscription expired. Fitness certificates cannot be generated.');
+        } catch {
+            return;
+        }
         const saved = await handleSave();
         if (!saved) return;
 

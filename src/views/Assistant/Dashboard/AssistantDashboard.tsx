@@ -12,6 +12,8 @@ import {
 import { setAsstFullPatientHistory } from '../../../controllers/slices/assistant/asstPatientVisitSlice';
 import { DraftService, type DraftPatient } from '../../../services/assistant/DraftService';
 import '../Assistant.css';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 
 const AssistantDashboard = () => {
     const dispatch = useAppDispatch();
@@ -22,6 +24,7 @@ const AssistantDashboard = () => {
     const { appointments, isLoading: loadingAppointments } = useAppSelector((state) => state.asstAppointments);
     const { user } = useAppSelector((state) => state.auth);
     const role = user?.role || 'Assistant';
+    const { isExpired } = useSubscription();
 
     // Local Data
     const [localDrafts, setLocalDrafts] = useState<DraftPatient[]>([]);
@@ -49,6 +52,11 @@ const AssistantDashboard = () => {
     }, [dispatch]);
 
     const handleNewVisit = () => {
+        try {
+            assertSubscriptionActive(isExpired, 'Subscription expired. New patient visits cannot be created.');
+        } catch {
+            return;
+        }
         navigate('/assistant/visit/new');
     };
 
@@ -65,6 +73,12 @@ const AssistantDashboard = () => {
     };
 
     const handleCheckIn = (apt: any) => {
+        try {
+            assertSubscriptionActive(isExpired, 'Subscription expired. New appointments cannot be checked in for new visits.');
+        } catch {
+            return;
+        }
+
         const draftId = `checkin_${apt.id || Math.random().toString(36).substr(2, 9)}`;
         const freshDraft: DraftPatient = {
             patientId: draftId,

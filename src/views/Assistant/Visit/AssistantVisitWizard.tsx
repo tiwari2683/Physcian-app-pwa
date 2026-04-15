@@ -8,7 +8,7 @@ import {
     loadAsstDraftIntoState,
 } from '../../../controllers/slices/assistant/asstPatientVisitSlice';
 import { 
-    initiateAsstVisitThunk, 
+    // initiateAsstVisitThunk, // Commented out to prevent premature visit initiation
     fetchAsstPatientDataThunk 
 } from '../../../controllers/assistant/asstThunks';
 import { BasicTab } from './Tabs/BasicTab';
@@ -52,7 +52,7 @@ const AssistantVisitWizard: React.FC = () => {
     const { 
         activeTab, 
         isVisitLocked, 
-        visitId, 
+        // visitId, // Commented out because premature Visit Initiation has been disabled
         patientId, 
         draftId, 
         cloudPatientId, 
@@ -111,8 +111,12 @@ const AssistantVisitWizard: React.FC = () => {
     }, [id, draftId, patientId]);
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 2. Visit Initiation (Cloud Handshake)
+    // 2. Visit Initiation (Cloud Handshake) - COMMENTED OUT
+    // Visit is now ONLY initiated in the backend when the Assistant clicks "Send to Doctor" 
+    // on the Overview Tab. This prevents patients from being prematurely added to the 
+    // waiting room queue upon simply clicking "Check In" while the assistant is still filling out details.
     // ──────────────────────────────────────────────────────────────────────────
+    /*
     useEffect(() => {
         const resolvedId = cloudPatientId || (!isLocalDraftId(patientId) ? patientId : null);
         const hasDemographics = !!basic.fullName;
@@ -128,6 +132,7 @@ const AssistantVisitWizard: React.FC = () => {
             }));
         }
     }, [isInitialized.current, patientId, cloudPatientId, visitId, basic.fullName]);
+    */
 
     // ──────────────────────────────────────────────────────────────────────────
     // 3. Local Auto-Save Logic (2s Debounce)

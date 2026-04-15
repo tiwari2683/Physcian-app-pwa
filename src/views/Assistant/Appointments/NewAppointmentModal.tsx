@@ -9,6 +9,11 @@ import type { Appointment } from '../../../models/index';
 import { patientService } from '../../../services/api/patientService';
 import toast from 'react-hot-toast';
 import { TimeInput12h } from '../../../components/Common/TimeInput12h';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import {
+    assertSubscriptionActive,
+    isSubscriptionBlockedError,
+} from '../../../services/subscription/subscriptionAccess';
 
 interface Props {
     onClose: () => void;
@@ -17,6 +22,7 @@ interface Props {
 
 export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) => {
     const dispatch = useAppDispatch();
+    const { isExpired } = useSubscription();
     const [loading, setLoading] = useState(false);
     
     // Existing vs New Mode
@@ -135,6 +141,14 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        try {
+            assertSubscriptionActive(
+                isExpired,
+                'Subscription expired. New appointments cannot be booked.'
+            );
+        } catch {
+            return;
+        }
 
         // Mobile validation for Indian numbers (10 digits starting with 6-9)
         if (mode === 'new') {
@@ -190,6 +204,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
             onClose();
         } catch (error) {
+            if (isSubscriptionBlockedError(error)) return;
             console.error('Failed to save appointment', error);
         } finally {
             setLoading(false);
@@ -466,7 +481,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                     <button 
                         type="submit" 
                         form="new-appointment-form" 
-                        disabled={loading || (mode === 'existing' && !selectedPatientId)}
+                        disabled={loading || (mode === 'existing' && !selectedPatientId) || isExpired}
                         className="px-8 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] bg-primary-base text-white shadow-xl shadow-primary-base/20 hover:bg-primary-dark transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center gap-2"
                     >
                         {loading && <Loader2 size={12} className="animate-spin" />}

@@ -7,6 +7,10 @@ import { patientService } from '../../../services/api/patientService';
 import { useSubscription } from '../../../controllers/hooks/useSubscription';
 import toast from 'react-hot-toast';
 import { TimeInput12h } from '../../../components/Common/TimeInput12h';
+import {
+    assertSubscriptionActive,
+    isSubscriptionBlockedError,
+} from '../../../services/subscription/subscriptionAccess';
 
 const Button = ({ variant = 'primary', loading, children, ...props }: any) => {
     const baseStyle = "px-5 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2";
@@ -155,8 +159,12 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (isExpired) {
-            toast.error('Subscription expired. New appointments cannot be created.');
+        try {
+            assertSubscriptionActive(
+                isExpired,
+                'Subscription expired. New appointments cannot be created.'
+            );
+        } catch {
             return;
         }
 
@@ -207,6 +215,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
             onClose();
         } catch (error) {
+            if (isSubscriptionBlockedError(error)) return;
             console.error('Failed to save appointment', error);
         } finally {
             setLoading(false);

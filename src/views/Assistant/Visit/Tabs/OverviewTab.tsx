@@ -8,11 +8,17 @@ import { setAsstIsSubmitting } from '../../../../controllers/slices/assistant/as
 import { DraftService } from '../../../../services/assistant/DraftService';
 import * as UploadService from '../../../../services/uploadService';
 import { usePendingFiles } from '../../../../contexts/PendingFilesContext';
+import { useSubscription } from '../../../../controllers/hooks/useSubscription';
+import {
+    assertSubscriptionActive,
+    isSubscriptionBlockedError,
+} from '../../../../services/subscription/subscriptionAccess';
 
 export const OverviewTab: React.FC = () => {
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
     const patientVisitState = useAppSelector((state) => state.asstPatientVisit);
+    const { isExpired } = useSubscription();
 
     const {
         basic,
@@ -42,6 +48,15 @@ export const OverviewTab: React.FC = () => {
     const populatedVitals = Object.entries(clinical.vitals).filter(([_, val]) => val !== undefined && val !== '');
 
     const handleSendToDoctor = async () => {
+        try {
+            assertSubscriptionActive(
+                isExpired,
+                'Subscription expired. New patient visits cannot be sent to doctor.'
+            );
+        } catch {
+            return;
+        }
+
         if (!basic.fullName) {
             alert('Patient name is required before sending.');
             return;
@@ -124,6 +139,7 @@ export const OverviewTab: React.FC = () => {
             // Return to Dashboard
             navigate('/');
         } catch (error: any) {
+            if (isSubscriptionBlockedError(error)) return;
             console.error('Error sending to Doctor or Uploading files:', error);
             
             // Extract a proper error message if error is an object
@@ -288,7 +304,7 @@ export const OverviewTab: React.FC = () => {
                     <Button
                         variant="primary"
                         onClick={handleSendToDoctor}
-                        disabled={isSending || !basic.fullName || hasOrphanedFiles}
+                        disabled={isSending || !basic.fullName || hasOrphanedFiles || isExpired}
                         className={`w-full md:w-auto min-w-[200px] flex justify-center items-center gap-2 py-3 shadow-lg ${
                             hasOrphanedFiles ? 'bg-red-400 opacity-60 cursor-not-allowed shadow-none hover:bg-red-400' : 'shadow-blue-500/20'
                         }`}

@@ -1,6 +1,7 @@
 // src/services/api/apiClient.ts
 import axios from 'axios';
 import { authService } from '../auth/authService';
+import { notifySubscriptionBlocked } from '../subscription/subscriptionAccess';
 
 const API_BASE_URL = import.meta.env.VITE_API_GATEWAY_URL || '';
 
@@ -38,12 +39,32 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    const data = error?.response?.data?.body
+      ? (typeof error.response.data.body === 'string'
+          ? JSON.parse(error.response.data.body)
+          : error.response.data.body)
+      : error?.response?.data;
+
     if (error.response && error.response.status === 401) {
       // Force logout or trigger a token refresh event here if needed
       console.error('Unauthorized access - please log in again.');
       authService.logout();
       window.location.href = '/login'; // Quick redirect fallback
     }
+
+    if (error.response && error.response.status === 402) {
+      const message =
+        data?.error ||
+        'Clinic subscription has expired or is suspended. Please renew to continue.';
+      notifySubscriptionBlocked(message);
+      return Promise.reject({
+        ...error,
+        subscriptionBlocked: true,
+        code: 'SUBSCRIPTION_EXPIRED',
+        userMessage: message,
+      });
+    }
+
     return Promise.reject(error);
   }
 );

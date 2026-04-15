@@ -692,28 +692,41 @@ export const handler = async (event, context) => {
         // ============================================================
         // TASK 2: THE SUBSCRIPTION SOFT GATE
         // ============================================================
-        const writeActions = [
-            'initiateVisit', 'updateVisit', 'completeVisit', 'updateVisitStatus',
-            'saveFitnessCertificate', 'addMedicine', 'deletePatient',
-            'savePrescription', 'confirmFileUpload', 'deletePatientFile', 'deleteDraft'
-        ];
+        const restrictedWriteActions = new Set([
+            'createPatient',
+            'processPatientData',
+            'initiateVisit',
+            'updateVisit',
+            'completeVisit',
+            'saveFitnessCertificate',
+            'savePrescription',
+        ]);
 
         // Detect legacy create/update actions
         const isLegacyWrite = (!action && requestData.patientId && requestData.updateMode) ||
             (!action && requestData.isPartialSave) ||
             (!action && requestData.name && requestData.age && requestData.sex);
 
-        if (writeActions.includes(action) || isLegacyWrite) {
+        if (restrictedWriteActions.has(action) || isLegacyWrite) {
             if (tenantId && userRole !== 'SuperAdmin') {
-                const isSubValid = await checkClinicSubscription(tenantId);
+                const subscriptionState = await getClinicSubscriptionState(tenantId);
 
-                if (!isSubValid) {
+                if (!subscriptionState.isActive) {
                     if (ENFORCE_BILLING) {
                         console.error(`⛔ 402 Payment Required. Tenant ${tenantId} is expired/suspended.`);
                         return {
                             statusCode: 402,
                             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-                            body: JSON.stringify({ success: false, error: "Payment Required: Clinic subscription expired or suspended." })
+                            body: JSON.stringify({
+                                success: false,
+                                code: 'SUBSCRIPTION_EXPIRED',
+                                error: "Payment Required: Clinic subscription expired or suspended.",
+                                subscription: {
+                                    status: subscriptionState.status,
+                                    expiryIso: subscriptionState.expiryIso,
+                                    serverTimeIso: new Date().toISOString(),
+                                }
+                            })
                         };
                     } else {
                         console.warn(`⚠️ Notice: Clinic subscription expired for ${tenantId}, but allowed due to ENFORCE_BILLING=false`);
@@ -893,32 +906,36 @@ async function validateRegistration(requestData) {
 /**
  * Checks if a clinic's subscription is active
  */
-async function checkClinicSubscription(tenantId) {
-    if (!tenantId) return true; // Failsafe, though guarded later
+async function getClinicSubscriptionState(tenantId) {
+    if (!tenantId) return { isActive: false, status: 'UNKNOWN', expiryIso: null };
 
     try {
         const clinicResult = await dynamodb.send(new GetCommand({
             TableName: CLINICS_TABLE,
-            Key: { tenant_id: tenantId }
+            Key: { tenant_id: tenantId },
+            ConsistentRead: true
         }));
 
         if (!clinicResult.Item) {
             console.warn(`⚠️ Clinic record not found for tenant: ${tenantId}`);
-            return false; // No record means no active subscription
+            return { isActive: false, status: 'MISSING', expiryIso: null };
         }
 
-        const expiryDate = new Date(clinicResult.Item.subscription_expiry);
-        const now = new Date();
+        const status = clinicResult.Item.status || 'ACTIVE';
+        const expiryIso = clinicResult.Item.subscription_expiry || null;
+        const expiryMs = expiryIso ? Date.parse(expiryIso) : NaN;
+        const nowMs = Date.now();
+        const expiredByTime = !Number.isFinite(expiryMs) || nowMs >= expiryMs;
+        const suspended = status === 'SUSPENDED';
 
-        if (expiryDate < now || clinicResult.Item.status === 'SUSPENDED') {
-            return false; // Expired or suspended
-        }
-        return true; // Valid
+        return {
+            isActive: !expiredByTime && !suspended,
+            status,
+            expiryIso
+        };
     } catch (error) {
         console.error("❌ Error checking subscription:", error.message);
-        // If DB fails, we fail OPEN during testing, but ideally CLOSE in prod. 
-        // We'll return false to trigger the soft gate warning.
-        return false;
+        return { isActive: false, status: 'UNKNOWN', expiryIso: null };
     }
 }
 

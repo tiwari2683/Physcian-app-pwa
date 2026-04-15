@@ -8,6 +8,11 @@ import { apiClient } from '../../../../services/api/apiClient';
 import toast from 'react-hot-toast';
 import { HistoryModal } from '../../../../components/Common/HistoryModal';
 import { ImageZoomModal } from '../../../../components/Common/ImageZoomModal';
+import { useSubscription } from '../../../../controllers/hooks/useSubscription';
+import {
+  assertSubscriptionActive,
+  isSubscriptionBlockedError,
+} from '../../../../services/subscription/subscriptionAccess';
 
 interface PrescriptionTabProps {
   formData: any;
@@ -241,6 +246,7 @@ const VisitContextSummary = ({ formData, patientId }: { formData: any, patientId
 
 export const PrescriptionTab: React.FC<PrescriptionTabProps> = ({ formData, setFormData, patientId }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { isExpired } = useSubscription();
 
   const initiateGenerateRequest = () => {
     if (formData.diagnosis || formData.selectedInvestigations?.length > 0 || formData.customInvestigations) {
@@ -251,6 +257,15 @@ export const PrescriptionTab: React.FC<PrescriptionTabProps> = ({ formData, setF
   };
 
   const executeGeneration = async (mode: string) => {
+    try {
+      assertSubscriptionActive(
+        isExpired,
+        'Subscription expired. Generating or sending prescriptions is blocked.'
+      );
+    } catch {
+      return;
+    }
+
     setDialogOpen(false);
     
     const incB = mode === 'all';
@@ -295,6 +310,7 @@ export const PrescriptionTab: React.FC<PrescriptionTabProps> = ({ formData, setF
       });
       toast.success('Prescription saved successfully', { id: loadingToast });
     } catch (error) {
+      if (isSubscriptionBlockedError(error)) return;
       console.error('Save prescription error:', error);
       toast.error('Failed to save prescription. Aborting PDF generation.', { id: loadingToast });
       return; 

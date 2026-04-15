@@ -11,6 +11,7 @@ export const Header = ({ onMobileMenuClick }: HeaderProps) => {
   const { logout } = useAuth();
   const { user } = useAppSelector((state) => state.auth);
   const { clinicName, daysLeft, isExpired, isExpiringSoon, expiryDateLabel } = useSubscription();
+  const isDoctor = user?.role === 'Doctor';
 
   // Badge style based on subscription health
   const badgeStyle = isExpired
@@ -42,7 +43,7 @@ export const Header = ({ onMobileMenuClick }: HeaderProps) => {
 
       <div className="flex items-center gap-3 shrink-0">
         {/* Subscription badge — moved to the right side */}
-        {expiryDateLabel && (
+        {isDoctor && expiryDateLabel && (
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] sm:text-xs font-bold leading-none transition-all ${badgeStyle}`}
             title={isExpired ? 'Subscription expired' : `Subscription valid until ${expiryDateLabel}`}

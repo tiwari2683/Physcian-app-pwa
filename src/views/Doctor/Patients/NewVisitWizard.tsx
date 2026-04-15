@@ -6,6 +6,8 @@ import { uploadFilesWithPresignedUrls, fileNeedsUpload } from '../../../services
 import type { LocalReportFile } from '../../../services/uploadService';
 import { useLocalDraft } from '../../../controllers/hooks/useLocalDraft';
 import { ArrowLeft, ArrowRight, Save, Loader2, AlertCircle, User, MessageSquare } from 'lucide-react';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import { assertSubscriptionActive, isSubscriptionBlockedError } from '../../../services/subscription/subscriptionAccess';
 
 import { ClinicalTab } from './Tabs/ClinicalTab';
 import { DiagnosisTab } from './Tabs/DiagnosisTab';
@@ -51,6 +53,7 @@ export const NewVisitWizard = () => {
 
   const [activeVisitId, setActiveVisitId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState({ name: '', contactNumber: '', age: '' });
+  const { isExpired } = useSubscription();
 
   const existingPatient = useAppSelector(state =>
     state.patients.patients.find(p => p.patientId === realPatientId)
@@ -187,6 +190,15 @@ export const NewVisitWizard = () => {
   };
 
   const handleCompleteVisit = async () => {
+    try {
+      assertSubscriptionActive(
+        isExpired,
+        'Subscription expired. New patient visits cannot be created or completed.'
+      );
+    } catch {
+      return;
+    }
+
     if (!validateBasicInfo()) {
       setActiveStep(0);
       return;
@@ -304,6 +316,7 @@ export const NewVisitWizard = () => {
       clearDraft();
       navigate('/doctor/patients');
     } catch (err) {
+      if (isSubscriptionBlockedError(err)) return;
       setSaveError('Failed to complete visit: ' + (err as Error).message);
     } finally {
       setIsSaving(false);

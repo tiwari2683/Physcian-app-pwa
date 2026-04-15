@@ -7,6 +7,7 @@ import { fetchAppointments } from '../../../controllers/slices/appointmentSlice'
 import { useSubscription } from '../../../controllers/hooks/useSubscription';
 import { DraftService } from '../../../services/draftService';
 import type { DraftPatient } from '../../../services/draftService';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 
 // ─── Relative time helper ────────────────────────────────────────────────────
 function timeAgo(iso: string): string {
@@ -69,6 +70,15 @@ export const DashboardScreen = () => {
     }
   };
 
+  const handleNewPatient = () => {
+    try {
+      assertSubscriptionActive(isExpired, 'Subscription expired. Creating a new patient is blocked.');
+    } catch {
+      return;
+    }
+    navigate('/doctor/visit/new');
+  };
+
   const handleResumeDraft = (draft: DraftPatient) => {
     navigate(`/doctor/visit/new/${draft.draftId}`);
   };
@@ -95,13 +105,13 @@ export const DashboardScreen = () => {
               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching...
             </span>
           )}
-          <button 
-             onClick={() => navigate('/doctor/visit/new')}
-             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 font-bold text-sm transition-all active:scale-95 shadow-sm shadow-blue-600/30 shrink-0"
+          <button
+            onClick={handleNewPatient}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 font-bold text-sm transition-all active:scale-95 shadow-sm shadow-blue-600/30 shrink-0"
           >
-             <UserPlus className="w-4 h-4" />
-             <span className="hidden sm:inline">New Patient</span>
-             <span className="sm:hidden">New</span>
+            <UserPlus className="w-4 h-4" />
+            <span className="hidden sm:inline">New Patient</span>
+            <span className="sm:hidden">New</span>
           </button>
         </div>
       </div>
@@ -180,7 +190,10 @@ export const DashboardScreen = () => {
         <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2.5">⚡ Quick Actions</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-4">
           {[
-            { label: 'New Patient', path: '/doctor/visit/new', icon: Users, color: 'blue', grad: 'from-blue-500/10 to-indigo-500/10' },
+            // ── "New Patient" removed from Quick Actions to avoid bypassing subscription
+            // ── expiry restrictions. The "New Patient" button in the header (top-right)
+            // ── already enforces subscription checks via handleNewPatient → assertSubscriptionActive.
+            // { label: 'New Patient', path: '/doctor/visit/new', icon: Users, color: 'blue', grad: 'from-blue-500/10 to-indigo-500/10' },
             { label: 'Schedule', path: '/doctor/appointments', icon: Calendar, color: 'amber', grad: 'from-amber-500/10 to-orange-500/10' },
             { label: 'Messages', path: '/doctor/prescriptions', icon: Activity, color: 'teal', grad: 'from-teal-500/10 to-emerald-500/10' },
             { label: 'Settings', path: '/doctor/settings', icon: RefreshCw, color: 'slate', grad: 'from-slate-500/10 to-slate-800/10' }
