@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, UserPlus, FileText, Eye } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks';
 import { fetchPatients } from '../../../controllers/slices/patientSlice';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 
 export const PatientDirectory = () => {
   const navigate = useNavigate();
@@ -10,6 +12,17 @@ export const PatientDirectory = () => {
   const dispatch = useAppDispatch();
   const { patients, loading, error } = useAppSelector((state) => state.patients);
   const [searchTerm, setSearchTerm] = useState('');
+  const { isExpired } = useSubscription();
+
+  const handleNewPatient = () => {
+    assertSubscriptionActive(isExpired, 'Subscription expired. New patient registrations are blocked.');
+    navigate('/doctor/patients/new');
+  };
+
+  const handleStartVisit = (patientId: string) => {
+    assertSubscriptionActive(isExpired, 'Subscription expired. New visits cannot be started.');
+    navigate(`/doctor/visit/new/${patientId}`);
+  };
 
   const isCertificateMode = location.pathname.includes('/fitness-certificate');
 
@@ -29,7 +42,7 @@ export const PatientDirectory = () => {
         <h1 className="text-2xl font-bold text-gray-900">
           {isCertificateMode ? 'Select Patient' : 'Patient Directory'}
         </h1>
-        <button onClick={() => navigate('/doctor/patients/new')} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
+        <button onClick={handleNewPatient} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
           <UserPlus className="w-4 h-4" />
           <span className="font-medium">New Patient</span>
         </button>
@@ -117,7 +130,7 @@ export const PatientDirectory = () => {
                       View
                     </button>
                     <button 
-                      onClick={() => navigate(`/doctor/visit/new/${patient.patientId}`)}
+                      onClick={() => handleStartVisit(patient.patientId)}
                       className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all bg-white text-blue-600 border border-gray-200 hover:bg-blue-50 hover:border-blue-200 shadow-sm"
                     >
                       <FileText className="w-4 h-4" />

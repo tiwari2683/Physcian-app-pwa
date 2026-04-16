@@ -245,10 +245,10 @@ const AssistantVisitWizard: React.FC = () => {
                                 onClick={() => !isBlocked && dispatch(setAsstActiveTab(tab.id))}
                                 disabled={isBlocked}
                                 className={`relative flex items-center gap-2.5 px-6 py-3 rounded-2xl font-black text-xs md:text-sm whitespace-nowrap transition-all duration-300 group ${isActive
-                                        ? 'text-white'
-                                        : isBlocked
-                                            ? 'text-slate-300 cursor-not-allowed'
-                                            : 'text-slate-500 hover:bg-slate-50'
+                                    ? 'text-white'
+                                    : isBlocked
+                                        ? 'text-slate-300 cursor-not-allowed'
+                                        : 'text-slate-500 hover:bg-slate-50'
                                     }`}
                             >
                                 {isActive && (

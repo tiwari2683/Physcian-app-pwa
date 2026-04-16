@@ -57,6 +57,12 @@ export const DashboardScreen = () => {
   }, [dispatch]);
 
   const handleStartConsultation = async (patient: any) => {
+    try {
+      assertSubscriptionActive(isExpired, 'Subscription expired. New visits cannot be started.');
+    } catch {
+      return;
+    }
+    
     setStartingVisitId(patient.visitId);
     try {
       await dispatch(updateVisitStatusThunk({

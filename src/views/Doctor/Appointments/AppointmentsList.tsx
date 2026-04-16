@@ -4,11 +4,14 @@ import { fetchAppointments } from '../../../controllers/slices/appointmentSlice'
 import { Calendar, Clock, Plus, Search, MoreVertical, ChevronRight } from 'lucide-react';
 import { NewAppointmentModal } from './NewAppointmentModal';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 import type { Appointment } from '../../../models';
 
 const AppointmentsList = () => {
     const dispatch = useAppDispatch();
     const { appointments, isLoading } = useAppSelector(state => state.appointments);
+    const { isExpired } = useSubscription();
     const [activeTab, setActiveTab] = useState<'Today' | 'Upcoming' | 'Completed' | 'Canceled'>('Today');
     const [searchQuery, setSearchQuery] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -122,6 +125,9 @@ const AppointmentsList = () => {
                 </div>
                 <button
                     onClick={() => {
+                        try {
+                            assertSubscriptionActive(isExpired, 'Subscription expired. New appointments cannot be booked.');
+                        } catch { return; }
                         setSelectedAppointment(null);
                         setIsModalOpen(true);
                     }}
@@ -235,6 +241,9 @@ const AppointmentsList = () => {
                                                             className="w-full text-left px-5 py-3.5 hover:bg-gray-50 text-sm text-gray-900 font-bold transition flex items-center justify-between group"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
+                                                                try {
+                                                                    assertSubscriptionActive(isExpired, 'Subscription expired. Appointments cannot be edited.');
+                                                                } catch { return; }
                                                                 setSelectedAppointment(apt);
                                                                 setIsModalOpen(true);
                                                                 setMenuOpenId(null);

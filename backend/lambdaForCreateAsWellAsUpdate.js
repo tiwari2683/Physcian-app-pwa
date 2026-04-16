@@ -1736,6 +1736,16 @@ async function processPatientData(requestData) {
 
         if (!name) return formatErrorResponse("Missing required field: name (fullName)");
 
+        // ============================================
+        // SUBSCRIPTION CHECK
+        // ============================================
+        if (requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            const subState = await getClinicSubscriptionState(requestData.tenantId);
+            if (!subState.isActive) {
+                return formatErrorResponse("Subscription expired. Patient registration is blocked.", 403);
+            }
+        }
+
         // DEDUP CHECK 1: explicit patientId
         if (providedPatientId) {
             const existingById = await dynamodb.send(new GetCommand({
@@ -1816,6 +1826,16 @@ async function initiateVisit(requestData) {
 
         if (!patientId) {
             return formatErrorResponse("Missing patientId");
+        }
+
+        // ============================================
+        // SUBSCRIPTION CHECK
+        // ============================================
+        if (requestData.tenantId && requestData.userRole !== 'SuperAdmin') {
+            const subState = await getClinicSubscriptionState(requestData.tenantId);
+            if (!subState.isActive) {
+                return formatErrorResponse("Subscription expired. New visits cannot be initiated.", 403);
+            }
         }
 
         // ── IDEMPOTENCY GUARD ──────────────────────────────────────────────

@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks/hooks';
 import { fetchAsstPatientsThunk } from '../../../controllers/assistant/asstThunks';
+import { useSubscription } from '../../../controllers/hooks/useSubscription';
+import { assertSubscriptionActive } from '../../../services/subscription/subscriptionAccess';
 import { 
     Search, 
     Activity, 
@@ -25,8 +27,20 @@ const AssistantPatientsDirectory: React.FC = () => {
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
     const { patients, isLoading } = useAppSelector(state => state.asstPatients);
+    const { isExpired } = useSubscription();
 
     const [searchQuery, setSearchQuery] = useState('');
+
+    const handleNewPatient = () => {
+        assertSubscriptionActive(isExpired, 'Subscription expired. New patient registrations are blocked.');
+        navigate('/assistant/visit/new');
+    };
+
+    const handleAddVitals = (e: React.MouseEvent, patientId: string) => {
+        e.stopPropagation();
+        assertSubscriptionActive(isExpired, 'Subscription expired. New visits cannot be started.');
+        navigate(`/assistant/visit/${patientId}`);
+    };
     const [activeFilter, setActiveFilter] = useState<FilterOption>('All');
     const [sortOption, setSortOption] = useState<SortOption>('Newest First');
 
@@ -108,7 +122,7 @@ const AssistantPatientsDirectory: React.FC = () => {
                 </div>
                 
                 <button
-                    onClick={() => navigate('/assistant/visit/new')}
+                    onClick={handleNewPatient}
                     className="w-full md:w-auto btn-primary py-2.5 px-6 flex items-center justify-center gap-2.5 shadow-lg"
                 >
                     <UserPlus size={18} />
@@ -251,10 +265,7 @@ const AssistantPatientsDirectory: React.FC = () => {
                                             View Profile
                                         </button>
                                         <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                navigate(`/assistant/visit/${patient.patientId}`);
-                                            }}
+                                            onClick={(e) => handleAddVitals(e, patient.patientId)}
                                             className="flex-1 lg:w-full px-6 py-2.5 rounded-xl transition-all active:scale-95 btn-primary text-xs whitespace-nowrap"
                                         >
                                             Add Vitals
