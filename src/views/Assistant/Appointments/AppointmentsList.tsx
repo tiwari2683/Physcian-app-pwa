@@ -106,7 +106,7 @@ const AppointmentsList = () => {
     };
 
     return (
-        <motion.div 
+        <motion.div
             initial="hidden"
             animate="visible"
             variants={containerVariants}
@@ -177,7 +177,7 @@ const AppointmentsList = () => {
                             <p className="text-type-body font-bold animate-pulse">Fetching records...</p>
                         </div>
                     ) : (filteredAppointments || []).length === 0 ? (
-                        <motion.div 
+                        <motion.div
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             className="col-span-full py-20 text-center glass-card border-dashed border-slate-300"
@@ -194,7 +194,7 @@ const AppointmentsList = () => {
                             const styles = getStatusStyles(smartStatus);
 
                             return (
-                                <motion.div 
+                                <motion.div
                                     key={apt.id}
                                     layout
                                     initial={{ opacity: 0, scale: 0.95 }}
@@ -232,7 +232,7 @@ const AppointmentsList = () => {
                                             </button>
                                             <AnimatePresence>
                                                 {menuOpenId === apt.id && (
-                                                    <motion.div 
+                                                    <motion.div
                                                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                                         animate={{ opacity: 1, y: 0, scale: 1 }}
                                                         exit={{ opacity: 0, scale: 0.95 }}

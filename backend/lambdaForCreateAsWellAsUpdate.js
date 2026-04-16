@@ -1762,21 +1762,30 @@ async function processPatientData(requestData) {
             }
         }
 
-        // DEDUP CHECK 2: mobile number
-        if (mobile) {
+        // DEDUP CHECK 2: mobile number + name (case-insensitive) restricted to tenant
+        if (mobile && requestData.tenantId) {
             const mobileScan = await dynamodb.send(new ScanCommand({
                 TableName: PATIENTS_TABLE,
-                FilterExpression: 'mobile = :m',
-                ExpressionAttributeValues: { ':m': mobile }
+                FilterExpression: 'mobile = :m AND tenant_id = :t',
+                ExpressionAttributeValues: { ':m': mobile, ':t': requestData.tenantId }
             }));
+            
             if (mobileScan.Items && mobileScan.Items.length > 0) {
-                const existing = mobileScan.Items[0];
-                console.log(`♻️ Found existing patient ${existing.patientId} with mobile ${mobile}.`);
-                return formatSuccessResponse({
-                    success: true,
-                    patientId: existing.patientId,
-                    message: "Existing patient record returned"
-                });
+                const normalizedNewName = name.trim().toLowerCase();
+                const existingMatch = mobileScan.Items.find(p => 
+                    p.name && p.name.trim().toLowerCase() === normalizedNewName
+                );
+                
+                if (existingMatch) {
+                    console.log(`♻️ Found existing patient ${existingMatch.patientId} with mobile ${mobile} and name ${name}.`);
+                    return formatSuccessResponse({
+                        success: true,
+                        patientId: existingMatch.patientId,
+                        message: "Existing patient record returned"
+                    });
+                } else {
+                    console.log(`ℹ️ Mobile ${mobile} exists, but for different family members. Allowing new creation.`);
+                }
             }
         }
 
